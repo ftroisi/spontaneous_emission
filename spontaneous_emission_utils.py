@@ -67,7 +67,7 @@ def get_h_qed(el_eigenvals: list[float],
                 ph_annihilation += BosonicOp({f'-_{k}': lm_couplings[k]},num_modes=len(ph_energies))
             # Build the interaction
             h_int += MixedOp({
-                ("F", "B"): [(-1., absorption_op, ph_annihilation),(-1., emission_op, ph_creation)],
+                ("F", "B"): [(1., absorption_op, ph_annihilation),(1., emission_op, ph_creation)],
             })
     # Finally, put it all together
     h_qed = MixedOp(
@@ -126,6 +126,7 @@ def custom_time_evolve(h_mapped: SparsePauliOp,
                        observables_mapped: list[SparsePauliOp],
                        initial_state: Statevector,
                        evolution_stategy: Literal["tc", "ct", "tct"],
+                       evolution_synthesis: Literal["suzuki_trotter", "lie_trotter"],
                        optimization_level: int,
                        backend: Backend,
                        estimator: Estimator,
@@ -157,7 +158,12 @@ def custom_time_evolve(h_mapped: SparsePauliOp,
 
     # 1. Initialize the single timestep evolution circuit
     time_evolution_circuit = QuantumCircuit(h_mapped.num_qubits)
-    single_step_evolution_gate = PauliEvolutionGate(h_mapped, delta_t, synthesis=SuzukiTrotter())
+    if evolution_synthesis == "suzuki_trotter":
+        single_step_evolution_gate: PauliEvolutionGate = \
+            PauliEvolutionGate(h_mapped, delta_t, synthesis=SuzukiTrotter())
+    else:
+        single_step_evolution_gate: PauliEvolutionGate = \
+            PauliEvolutionGate(h_mapped, delta_t, synthesis=LieTrotter())
     time_evolution_circuit.append(single_step_evolution_gate, time_evolution_circuit.qubits)
     # 2. Define thew array with the simesteps
     time: list[float] = [(delta_t * x) for x in range(1, int(final_time / delta_t) + 1)]
