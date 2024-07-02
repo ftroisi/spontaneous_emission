@@ -97,6 +97,15 @@ number_of_modes: int = len(photon_energies)
 lm_couplings: list[np.float64] = [np.sqrt(omega / cavity_length) * np.sin((2*alpha + 1) * np.pi / 2)
     for alpha, omega in enumerate(photon_energies)]
 
+# Print the parameters
+utils.message_output("Parameters:\n", "output")
+utils.message_output(f"Electron eigenvalues: {electron_eigenvalues}\n", "output")
+for i in range(number_of_modes):
+    utils.message_output(
+        f"Photon mode {2*i+1}: Energy: {photon_energies[i]} H.a.; LM coupling: {lm_couplings[i]}\n",
+        "output")
+utils.message_output("\n", "output")
+
 # NOW, COMPUTE USING THE UTILS
 # 1. GET QED HAMILTONIAN
 h_el, h_ph, h_int, h_qed = utils.get_h_qed(electron_eigenvalues, photon_energies, lm_couplings)
@@ -155,10 +164,10 @@ else:
         service.backends(simulator=False)
         # Finally, pick the select the backend
         backend = service.backend(hardware)
-        utils.message_output(f"Backend: {hardware}. Num qubits = {backend.num_qubits}", "output")
+        utils.message_output(f"Backend: {hardware}. Num qubits = {backend.num_qubits}\n", "output")
     except ValueError as e:
         backend = GenericBackendV2(num_qubits=hqed_mapped.num_qubits)
-        utils.message_output(f"Error: {e}. Using generic BE instead", "output")
+        utils.message_output(f"Error: {e}. Using generic BE instead\n", "output")
 # 7. Time evolve
 utils.message_output(
     f"Starting time evolution with delta_t = {delta_t} and final_time = {final_time}\n", "output")
