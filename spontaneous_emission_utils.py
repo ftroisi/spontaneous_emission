@@ -277,7 +277,7 @@ def transpile_combine_strategy(single_step_evolution_circuit: QuantumCircuit,
         for op in operations:
             message_output(f"{op}: {operations[op]}\n", "output")
         # Save circuit (only for the first two steps because after that it gets too long)
-        if idx < 2:
+        if idx < 2 and evolved_state.num_qubits <= 8:
             evolved_state.draw(output="mpl", filename=f"results/circuits/circuit_t_{t:.4f}.png")
         # Compute observables
         observables_result.append(
@@ -321,7 +321,7 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
         optimized_circuit: QuantumCircuit = \
             transpile(evolved_state, backend, optimization_level=optimization_level)
         # Save circuit (only for the first two steps because after that it gets too long)
-        if idx < 2:
+        if idx < 2 and optimized_circuit.num_qubits <= 8:
             optimized_circuit.draw(output="mpl", filename=f"results/circuits/circuit_t_{t:.4f}.png")
         message_output(
         f"Circuit optimized with level: {optimization_level}. Operation count:\n", "output")
@@ -391,7 +391,7 @@ def transpile_combine_transpile_strategy(single_step_evolution_circuit: QuantumC
             transpile(circuit, backend, optimization_level=optimization_level)
         optimized_layout_map = get_optimization_map(optimized_circuit)
         # Save circuit (only for the first two steps because after that it gets too long)
-        if idx < 2:
+        if idx < 2 and optimized_circuit.num_qubits <= 8:
             optimized_circuit.draw(output="mpl", filename=f"results/circuits/circuit_t_{t:.4f}.png")
         message_output(
         f"Circuit optimized with level: {optimization_level}. Operation count:\n", "output")
