@@ -6,7 +6,6 @@ import time
 import numpy as np
 from qiskit.primitives import Estimator
 from qiskit.providers.fake_provider import GenericBackendV2
-from qiskit.quantum_info import Statevector
 from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit_nature.second_q.operators import BosonicOp, FermionicOp, MixedOp
 
@@ -22,7 +21,7 @@ photon_energies = []
 number_of_modes: int | None = None
 cavity_length: float = 1.0
 number_of_fock_states: int = 1
-initial_state: str | None = None
+init_state: dict[int, tuple[complex | np.complex128, complex | np.complex128]] | None = None
 # Time evolution parameters
 delta_t: float = 0.1
 final_time: float = 4.0
@@ -62,8 +61,6 @@ with open('input', 'r', encoding="UTF-8") as f:
             number_of_fock_states = int(value[1].replace(' ', ''))
         elif value[0].replace(' ', '') == "number_of_modes":
             number_of_modes = int(value[1].replace(' ', ''))
-        elif value[0].replace(' ', '') == "initial_state":
-            initial_state = value[1].replace(' ', '')
         # Time evolution parameters
         elif value[0].replace(' ', '') == "delta_t":
             delta_t = float(value[1].replace(' ', ''))
@@ -144,11 +141,12 @@ mixed_papper = utils.get_mapper(number_of_modes, number_of_fock_states)
 hqed_mapped = mixed_papper.map(h_qed)
 observables_mapped = [mixed_papper.map(op) for op in observables]
 # 5. DEFINE THE INITIAL STATE: The matter is in the excited state, the photons in the vacuum state
-if initial_state is not None:
-    init_state = Statevector.from_label(initial_state)
-else:
-    init_state = Statevector.from_label(
-        "10" + "0" * number_of_modes * math.ceil(np.log2(number_of_fock_states + 1)))
+init_state: dict[int, tuple[complex | np.complex128, complex | np.complex128]] = {}
+for n in range(number_of_modes):
+    init_state[n] = (np.complex128(1), np.complex128(0))
+# Add matter part
+init_state[number_of_modes] = (np.complex128(1), np.complex128(0))
+init_state[number_of_modes + 1] = (np.complex128(0), np.complex128(1))
 # 6. DEFINE THE HARDWARE
 if hardware == "generic_simulator":
     backend = GenericBackendV2(num_qubits=hqed_mapped.num_qubits)
