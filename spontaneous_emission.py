@@ -87,14 +87,13 @@ with open('input', 'r', encoding="UTF-8") as f:
 
 # Define modes frequency and couplings
 # Equation 6 of: https://www.pnas.org/doi/full/10.1073/pnas.1615509114#sec-5
-# omega_a = pi * c * a /L
 if len(photon_energies) == 0 and number_of_modes is None:
     raise ValueError("If photon_energies is not provided, number_of_modes must be provided")
 if len(photon_energies) == 0:
     photon_energies = [np.pi * C * alpha / cavity_length for alpha in range(1,2*number_of_modes,2)]
 number_of_modes: int = len(photon_energies)
-# g_a = sqrt(omega_a / L) * sin(a * pi / 2)
-lm_couplings: list[np.float64] = [np.sqrt(omega / cavity_length) * np.sin((2*alpha + 1) * np.pi / 2)
+lm_couplings: list[np.float64] = \
+    [np.sqrt(omega / cavity_length) * np.sin((2*alpha + 1) * np.pi / 2)
     for alpha, omega in enumerate(photon_energies)]
 
 # Print the parameters
@@ -144,11 +143,13 @@ mixed_papper = utils.get_mapper(number_of_modes, number_of_fock_states)
 hqed_mapped = mixed_papper.map(h_qed)
 observables_mapped = [mixed_papper.map(op) for op in observables]
 # 5. DEFINE THE INITIAL STATE: The matter is in the excited state, the photons in the vacuum state
-if initial_state is not None:
-    init_state = Statevector.from_label(initial_state)
-else:
-    init_state = Statevector.from_label(
-        "10" + "0" * number_of_modes * math.ceil(np.log2(number_of_fock_states + 1)))
+init_state: dict[int, tuple[complex | np.complex128, complex | np.complex128]] = {}
+for n in range(number_of_modes):
+    init_state[n] = (np.complex128(1), np.complex128(0))
+# Add matter part
+init_state[number_of_modes] = (np.complex128(1), np.complex128(0))
+init_state[number_of_modes + 1] = (np.complex128(0), np.complex128(1))
+print(len(init_state))
 # 6. DEFINE THE HARDWARE
 if hardware == "generic_simulator":
     backend = GenericBackendV2(num_qubits=hqed_mapped.num_qubits)
