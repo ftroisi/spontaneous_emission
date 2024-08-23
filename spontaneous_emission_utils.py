@@ -1,12 +1,15 @@
 import collections
-from typing import Literal
+from typing import List, Literal
 import numpy as np
 from qiskit import (QuantumCircuit, transpile)
 from qiskit.circuit.library import PauliEvolutionGate
+from qiskit.circuit.quantumregister import Qubit
 from qiskit.primitives import Estimator
 from qiskit.providers import Backend
 from qiskit.quantum_info import SparsePauliOp, Statevector
 from qiskit.synthesis import LieTrotter, SuzukiTrotter
+from qiskit.transpiler import TranspileLayout
+from qiskit.visualization import plot_circuit_layout
 
 from qiskit_algorithms import (TimeEvolutionProblem, TimeEvolutionResult,
                                TrotterQRTE)
@@ -124,7 +127,8 @@ def qubit_idx_to_str_idx(qubit_idx: int, str_len: int) -> int:
 
 def custom_time_evolve(h_mapped: SparsePauliOp,
                        observables_mapped: list[SparsePauliOp],
-                       initial_state: Statevector,
+                       initial_state: dict[int,
+                                           tuple[complex | np.complex128, complex | np.complex128]],
                        evolution_stategy: Literal["tc", "ct", "tct"],
                        evolution_synthesis: Literal["suzuki_trotter", "lie_trotter"],
                        optimization_level: int,
@@ -139,7 +143,9 @@ def custom_time_evolve(h_mapped: SparsePauliOp,
     Args:
         h_mapped: The Hamiltonian (already mapped to the qubit space) to be time evolved.
         observables_mapped: The observables (already mapped to the qubit space) to be estimated.
-        initial_state: The initial state of the system.
+        initial_state: The initial state of the system. It shall be a dictionary where the
+            key is the qubit index and the value is a list of complex numbers representing the
+            state of the qubit.
         evolution_stategy: The optimization strategy to be used by the transpiler.\n
             - "tc": First transpile the single timestep circuit and then combine the circuits.\n
             - "ct": First combine the unoptimized circuit, then transpile the combined circuit.\n
@@ -196,7 +202,6 @@ def custom_time_evolve(h_mapped: SparsePauliOp,
             backend)
     raise ValueError("Invalid evolution strategy")
 
-
 def get_optimization_map(circuit: QuantumCircuit) -> dict:
     """
     Now define a map from the old circuit layout to the new one. This must be done because the
@@ -207,31 +212,103 @@ def get_optimization_map(circuit: QuantumCircuit) -> dict:
     optimized_layout_map = {}
     for item in circuit.layout.initial_virtual_layout().get_virtual_bits().items():
         optimized_layout_map[item[1]] = item[0]._index
+    ordered_layout_map = collections.OrderedDict(sorted(optimized_layout_map.items()))
+    print(circuit.layout.final_index_layout())
     return collections.OrderedDict(sorted(optimized_layout_map.items()))
 
-def optimize_obervables(observables: list[SparsePauliOp], optimized_layout_map: dict, num_qubits: int) -> list[SparsePauliOp]:
+def optimize_obervables(observables: list[SparsePauliOp],
+                        circuit: QuantumCircuit) -> list[SparsePauliOp]:
+    """
+    This method optimizes the observables to match the new qubit layout.
+
+    Args:
+        observables: The observables to be optimized.
+        circuit: The circuit with the new qubit layout, as obtained from the transpiler.
+
+    Returns:
+        A list containing the optimized observables.
+    """
     optimized_observables: list[SparsePauliOp] = []
+    final_index_layout: List[int] = circuit.layout.final_index_layout()
     # First loop over the observables that should be computed
-    for idx, observable in enumerate(observables):
+    for _, observable in enumerate(observables):
         optimized_observable: list[tuple[str, complex | np.complex128]] = []
         # Then loop over the terms of the observable. These are the Pauli strings (e.g. 'IIIZ')
         for op, coeff in observable.to_list():
+            optimized_op: list[str] = ["I"] * circuit.num_qubits
             # For each term, we need to map the qubit indices to the new layout
-            optimized_op: str = "".join(
-                op[qubit_idx_to_str_idx(s, num_qubits)]
-                for s in np.asarray([optimized_layout_map[k] for k in range(num_qubits)])
-            )
-            optimized_observable.append((optimized_op[::-1], coeff))
+            for idx, i in enumerate(final_index_layout):
+                optimized_op[idx] = op[idx]
+            optimized_observable.append(("".join(optimized_op), coeff))
         optimized_observables.append(SparsePauliOp.from_list(optimized_observable))
     return optimized_observables
 
-def optimize_init_state(initial_state: Statevector, optimized_layout_map: dict, num_qubits: int) -> Statevector:
-    old_init_state: str = get_keys_as_list(initial_state.to_dict())[0]
-    optimized_init_state: str = "".join(
-        old_init_state[qubit_idx_to_str_idx(s, num_qubits)]
-        for s in np.asarray([optimized_layout_map[k] for k in range(num_qubits)])
-    )
-    return Statevector.from_label(optimized_init_state[::-1])
+def count_gates(qc: QuantumCircuit) -> dict[Qubit, int]:
+    gate_count = { qubit: 0 for qubit in qc.qubits }
+    for gate in qc.data:
+        for qubit in gate.qubits:
+            gate_count[qubit] += 1
+    return gate_count
+
+def remove_idle_wires(qc: QuantumCircuit) -> QuantumCircuit:
+    qc_out = qc.copy()
+    gate_count = count_gates(qc_out)
+    for qubit, count in gate_count.items():
+        if count == 0:
+            qc_out.qubits.remove(qubit)
+    return qc_out
+
+def optimize_init_state(
+        initial_state: dict[int, tuple[complex | np.complex128, complex | np.complex128]],
+        circuit: QuantumCircuit
+    ) -> dict[int, tuple[complex | np.complex128, complex | np.complex128]]:
+    """
+    This method optimizes the initial state to match the new qubit layout.
+
+    Args:
+        initial_state: The initial state to be optimized.
+        circuit: The circuit with the new qubit layout, as obtained from the transpiler.
+
+    Returns:
+        A Statevector containing the optimized initial state.
+    """
+    optimized_init_state: dict[int, tuple[complex | np.complex128, complex | np.complex128]] = {}
+    print(initial_state)
+    for idx, i in enumerate(circuit.layout.final_index_layout()):
+        optimized_init_state[i] = initial_state[idx]
+    print(optimized_init_state)
+    return optimized_init_state
+    # First, get the initial state as a string
+    # old_init_state: str = get_keys_as_list(initial_state.to_dict())[0]
+    # # Then, initialize the optimized initial state as an array of zeros
+    # optimized_init_state: list[str] = ["0"] * circuit.num_qubits
+    # # Finally, loop over the qubits in the new layout and fill the optimized initial state
+    # # Note that final_index_layout() does not return the ancilla qubits
+    # for idx, i in enumerate(circuit.layout.final_index_layout()):
+    #     optimized_init_state[i] = old_init_state[idx]
+    # print("".join(optimized_init_state))
+    # print(len(optimized_init_state), circuit.num_qubits)
+    # return Statevector.from_label("".join(optimized_init_state))
+
+def prepare_circuit(
+        circuit: QuantumCircuit,
+        initial_state: dict[int, tuple[complex | np.complex128, complex | np.complex128]]
+    ) -> QuantumCircuit:
+    """
+    This method prepares the circuit with the initial state.
+
+    Args:
+        circuit: The circuit to be prepared.
+        initial_state: The initial state of the system. It shall be a dictionary where the
+            key is the qubit index and the value is a list of complex numbers representing
+            the state of the qubit.
+
+    Returns:
+        A QuantumCircuit with the initial state prepared.
+    """
+    for qubit, state in initial_state.items():
+        circuit.prepare_state([state[0], state[1]], qubit)
+    return circuit
 
 def transpile_combine_strategy(single_step_evolution_circuit: QuantumCircuit,
                                initial_state: Statevector,
@@ -252,12 +329,12 @@ def transpile_combine_strategy(single_step_evolution_circuit: QuantumCircuit,
     evolved_state = QuantumCircuit(single_step_evolution_circuit_optimized.qubits)
     # 4. Optimize the initial state to match the new qubit layout.
     optimized_init_state: Statevector = \
-        optimize_init_state(initial_state, optimized_layout_map, evolved_state.num_qubits)
+        optimize_init_state(initial_state, single_step_evolution_circuit_optimized)
     # 4.1 Prepare the state in the circuit
     evolved_state.prepare_state(optimized_init_state)
     # 5. Optimize the observables to match the new qubit layout
     optimized_observables: list[SparsePauliOp] = \
-        optimize_obervables(observables, optimized_layout_map, evolved_state.num_qubits)
+        optimize_obervables(observables, single_step_evolution_circuit_optimized)
     # 6. Get the observables at time 0
     observables_result = [
         estimate_observables(
@@ -295,23 +372,24 @@ def transpile_combine_strategy(single_step_evolution_circuit: QuantumCircuit,
                                 observables_result,
                                 times=np.array([0.0] + time))
 
-def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
-                               initial_state: Statevector,
-                               observables: list[SparsePauliOp],
-                               time: list[float],
-                               optimization_level: int,
-                               estimator: Estimator,
-                               backend: Backend) -> QuantumCircuit:
-    """"
+def combine_transpile_strategy(
+        single_step_evolution_circuit: QuantumCircuit,
+        initial_state: dict[int, tuple[complex | np.complex128, complex | np.complex128]],
+        observables: list[SparsePauliOp],
+        time: list[float],
+        optimization_level: int,
+        estimator: Estimator,
+        backend: Backend) -> QuantumCircuit:
+    """
     This method transpiles the combined circuit.
     """
     # 1. Define and initialize the evolved state
     evolved_state = QuantumCircuit(single_step_evolution_circuit.qubits)
-    evolved_state.prepare_state(initial_state)
+    evolved_state: QuantumCircuit = prepare_circuit(evolved_state, initial_state)
     # 2. Get the t = 0 observables
     observables_result = [
         estimate_observables(estimator, evolved_state, observables, None, 1e-12)
-        ]
+    ]
     # 3. Time evolution
     for idx, t in enumerate(time):
         message_output(f"Time step {idx + 1}/{len(time)}\n", "output")
@@ -320,18 +398,21 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
         # Then, transpile the combined circuit
         optimized_circuit: QuantumCircuit = \
             transpile(evolved_state, backend, optimization_level=optimization_level)
+        optimized_circuit = remove_idle_wires(optimized_circuit)
         # Save circuit (only for the first two steps because after that it gets too long)
-        if idx < 2 and optimized_circuit.num_qubits <= 8:
-            optimized_circuit.draw(output="mpl", filename=f"results/circuits/circuit_t_{t:.4f}.png")
+        if idx < 2 and optimized_circuit.num_qubits < 8:
+            f = plot_circuit_layout(optimized_circuit, backend, view="physical")
+            f.savefig(f"results/circuits/layout_{str(optimized_circuit.num_qubits)}.png")
+        #     optimized_circuit.decompose(reps=1).draw(output="mpl", filename=f"results/circuits/circuit_t_{t:.4f}.png")
         message_output(
-        f"Circuit optimized with level: {optimization_level}. Operation count:\n", "output")
-        operations = optimized_circuit.count_ops()
+            f"Circuit optimized with level: {optimization_level}. Operation count:\n", "output")
+        operations = optimized_circuit.decompose(reps=2).decompose(
+            "disentangler_dg").decompose("multiplex1_reverse_dg").count_ops()
         for op in operations:
             message_output(f"{op}: {operations[op]}\n", "output")
+        message_output(f"Circuit depth: {optimized_circuit.depth()}\n", "output")
         # Get the optimization map and optimize the observables
-        optimized_layout_map = get_optimization_map(optimized_circuit)
-        optimized_observables: list[SparsePauliOp] = \
-            optimize_obervables(observables, optimized_layout_map, optimized_circuit.num_qubits)
+        optimized_observables: list[SparsePauliOp] = optimize_obervables(observables, optimized_circuit)
         # Get the observables at time t
         observables_result.append(
             estimate_observables(estimator, optimized_circuit, optimized_observables, None, 1e-12)
@@ -356,18 +437,16 @@ def transpile_combine_transpile_strategy(single_step_evolution_circuit: QuantumC
     # 1. Optimize the circuit
     single_step_evolution_circuit_optimized: QuantumCircuit = \
         transpile(single_step_evolution_circuit, backend, optimization_level=optimization_level)
-    # 2. Get the optimization map
-    optimized_layout_map = get_optimization_map(single_step_evolution_circuit_optimized)
-    # 3. Initialized the evolved state
-    base_circuit = QuantumCircuit(single_step_evolution_circuit_optimized.qubits)
+    base_circuit = single_step_evolution_circuit_optimized.copy()
+    base_circuit.clear()
     # 4. Optimize the initial state to match the new qubit layout.
-    t_0_optimized_init_state: Statevector = \
-        optimize_init_state(initial_state, optimized_layout_map, base_circuit.num_qubits)
+    t_0_optimized_init_state: dict[int, tuple[complex | np.complex128, complex | np.complex128]] =\
+        optimize_init_state(initial_state, single_step_evolution_circuit_optimized)
     # 4.1 Prepare the state in the circuit
-    base_circuit.prepare_state(t_0_optimized_init_state)
+    base_circuit: QuantumCircuit = prepare_circuit(base_circuit, t_0_optimized_init_state)
+    base_circuit = remove_idle_wires(base_circuit)
     # 5. Optimize the observables to match the new qubit layout
-    t_0_optimized_observables: list[SparsePauliOp] = \
-        optimize_obervables(observables, optimized_layout_map, base_circuit.num_qubits)
+    t_0_optimized_observables: list[SparsePauliOp] = optimize_obervables(observables, base_circuit)
     # 6. Get the observables at time 0
     observables_result = [
         estimate_observables(
@@ -378,21 +457,23 @@ def transpile_combine_transpile_strategy(single_step_evolution_circuit: QuantumC
             1e-12
         )]
     # 7. Time evolution
-    optimized_circuit_without_initial_state = QuantumCircuit(single_step_evolution_circuit_optimized.qubits)
-    for idx, t in enumerate(time):
+    optimized_circuit_without_initial_state: QuantumCircuit = single_step_evolution_circuit_optimized.copy()
+    optimized_circuit_without_initial_state.clear()
+    for idx, _ in enumerate(time):
         message_output(f"Time step {idx + 1}/{len(time)}\n", "output")
-        base_circuit = QuantumCircuit(single_step_evolution_circuit_optimized.qubits)
-        base_circuit.prepare_state(t_0_optimized_init_state)
+        circuit: QuantumCircuit = single_step_evolution_circuit_optimized.copy()
+        circuit.clear()
+        circuit = prepare_circuit(circuit, t_0_optimized_init_state)
         # 1. Compose the unoptimized circuit
         optimized_circuit_without_initial_state.compose(single_step_evolution_circuit_optimized, inplace=True)
-        circuit: QuantumCircuit = base_circuit.compose(optimized_circuit_without_initial_state)
+        circuit.compose(optimized_circuit_without_initial_state, inplace=True)
         # 2. Transpile the combined circuit
         optimized_circuit: QuantumCircuit = \
             transpile(circuit, backend, optimization_level=optimization_level)
-        optimized_layout_map = get_optimization_map(optimized_circuit)
+        optimized_circuit = remove_idle_wires(optimized_circuit)
         # Save circuit (only for the first two steps because after that it gets too long)
-        if idx < 2 and optimized_circuit.num_qubits <= 8:
-            optimized_circuit.draw(output="mpl", filename=f"results/circuits/circuit_t_{t:.4f}.png")
+        # if idx < 2 and optimized_circuit.num_qubits <= 8:
+        #     optimized_circuit.draw(output="mpl", filename=f"results/circuits/circuit_t_{t:.4f}.png")
         message_output(
         f"Circuit optimized with level: {optimization_level}. Operation count:\n", "output")
         operations = optimized_circuit.count_ops()
@@ -400,7 +481,7 @@ def transpile_combine_transpile_strategy(single_step_evolution_circuit: QuantumC
             message_output(f"{op}: {operations[op]}\n", "output")
         # Optimize the observables
         optimized_observables: list[SparsePauliOp] = \
-            optimize_obervables(t_0_optimized_observables, optimized_layout_map, optimized_circuit.num_qubits)
+            optimize_obervables(observables, optimized_circuit)
         # Get the observables at time t
         observables_result.append(
             estimate_observables(estimator, optimized_circuit, optimized_observables, None, 1e-12)
