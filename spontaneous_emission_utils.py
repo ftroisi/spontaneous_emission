@@ -210,10 +210,6 @@ def optimize_obervables(observables: List[SparsePauliOp],
         optimized_observable: List[tuple[str, complex | np.complex128]] = []
         # Then loop over the terms of the observable. These are the Pauli strings (e.g. 'IIIZ')
         for op, coeff in observable.to_list():
-            # If the Pauli string contains only one type of Pauli operator, we can skip it
-            if len(set(op)) == 1:
-                optimized_observable.append((op, coeff))
-                continue
             optimized_op: List[str] = ["I"] * circuit.num_qubits
             # For each term, we need to map the qubit indices to the new layout
             for idx, i in enumerate(final_index_layout):
