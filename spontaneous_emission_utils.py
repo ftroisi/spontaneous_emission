@@ -401,17 +401,13 @@ def transpile_combine_transpile_strategy(
             1e-12
         )]
     # 6. Time evolution
-    optimized_circuit_without_initial_state = QuantumCircuit(single_step_evolution_circuit_optimized.qubits)
     for idx, t in enumerate(time):
         message_output(f"Time step {idx + 1}/{len(time)}\n", "output")
-        base_circuit = QuantumCircuit(single_step_evolution_circuit_optimized.qubits)
-        base_circuit: QuantumCircuit = prepare_circuit(base_circuit, t_0_optimized_init_state)
         # 1. Compose the unoptimized circuit
-        optimized_circuit_without_initial_state.compose(single_step_evolution_circuit_optimized, inplace=True)
-        circuit: QuantumCircuit = base_circuit.compose(optimized_circuit_without_initial_state)
+        base_circuit.compose(single_step_evolution_circuit_optimized, inplace=True)
         # 2. Transpile the combined circuit
         optimized_circuit: QuantumCircuit = \
-            transpile(circuit, backend, optimization_level=optimization_level)
+            transpile(base_circuit.copy(), backend, optimization_level=optimization_level)
         # Save circuit (only for the first two steps because after that it gets too long)
         if idx < 2 and optimized_circuit.num_qubits <= 8:
             optimized_circuit.draw(output="mpl", filename=f"results/circuits/circuit_t_{t:.4f}.png")
@@ -422,13 +418,13 @@ def transpile_combine_transpile_strategy(
             message_output(f"{op}: {operations[op]}\n", "output")
         # Optimize the observables
         optimized_observables: List[SparsePauliOp] = \
-            optimize_obervables(observables, optimized_circuit)
+            optimize_obervables(t_0_optimized_observables, optimized_circuit)
         # Get the observables at time t
         observables_result.append(
             estimate_observables(estimator, optimized_circuit, optimized_observables, None, 1e-12)
         )
     # Return the result
-    return TimeEvolutionResult(optimized_circuit_without_initial_state,
+    return TimeEvolutionResult(optimized_circuit,
                                 observables_result[-1],
                                 observables_result,
                                 times=np.array([0.0] + time))
