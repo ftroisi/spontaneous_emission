@@ -2,6 +2,7 @@ import math
 import os
 import sys
 import time
+from typing import List
 
 import numpy as np
 from qiskit.primitives import Estimator
@@ -16,7 +17,7 @@ C = 137.03599 # Speed of light in atomic units
 
 # Define the parameters
 # 1D H atom with soft coulomb (https://journals.aps.org/pra/abstract/10.1103/PhysRevA.99.063819)
-electron_eigenvalues: list[float] = [-0.6738, -0.2798]
+electron_eigenvalues: List[float] = [-0.6738, -0.2798]
 photon_energies = []
 number_of_modes: int | None = None
 cavity_length: float = 1.0
@@ -31,7 +32,7 @@ optimization_level: int = 3
 time_evolution_strategy: str = "tct"
 time_evolution_synthesis: str = "lie_trotter"
 # Observables
-observables_requested: list[str] = ["energy", "particle_number", "ph_correlation"]
+observables_requested: List[str] = ["energy", "particle_number", "ph_correlation"]
 
 if not os.path.exists("results"):
     os.makedirs("results")
@@ -40,19 +41,19 @@ if not os.path.exists("results/circuits"):
 
 # Read input file
 with open('input', 'r', encoding="UTF-8") as f:
-    lines: list[str] = f.readlines()
+    lines: List[str] = f.readlines()
     for i, line in enumerate(lines):
         if line[0] == '#':
             continue
-        value: list[str] = line.split("\n")[0].split('=')
+        value: List[str] = line.split("\n")[0].split('=')
         # Assign values
         # System parameters
         if value[0].replace(' ', '') == "elec_energies":
-            electron_eigenvalues: list[float] = []
+            electron_eigenvalues: List[float] = []
             for electron_eigenvalue in value[1].split(';'):
                 electron_eigenvalues.append(float(electron_eigenvalue.replace(' ', '')))
         elif value[0].replace(' ', '') == "photon_energies":
-            photon_energies: list[float] = []
+            photon_energies: List[float] = []
             for photon_energy in value[1].split(';'):
                 photon_energies.append(float(photon_energy.replace(' ', '')))
         elif value[0].replace(' ', '') == "cavity_length":
@@ -77,7 +78,7 @@ with open('input', 'r', encoding="UTF-8") as f:
             time_evolution_synthesis: str = value[1].replace(' ', '')
         # Observables
         elif value[0].replace(' ', '') == "observables":
-            observables_requested: list[float] = []
+            observables_requested: List[float] = []
             for obs in value[1].split(';'):
                 observables_requested.append(obs.replace(' ', ''))
     f.close()
@@ -88,11 +89,12 @@ with open('input', 'r', encoding="UTF-8") as f:
 if len(photon_energies) == 0 and number_of_modes is None:
     raise ValueError("If photon_energies is not provided, number_of_modes must be provided")
 if len(photon_energies) == 0:
-    photon_energies = [np.pi * C * alpha / cavity_length for alpha in range(1,2*number_of_modes,2)]
+    photon_energies = [np.pi * C * 1 / cavity_length for alpha in range(1,2*number_of_modes,2)]
 number_of_modes: int = len(photon_energies)
 # g_a = sqrt(omega_a / L) * sin(a * pi / 2)
-lm_couplings: list[np.float64] = [np.sqrt(omega / cavity_length) * np.sin((2*alpha + 1) * np.pi / 2)
-    for alpha, omega in enumerate(photon_energies)]
+lm_couplings: List[np.float64] = \
+    [20*np.sqrt(omega / cavity_length) * np.sin((2*alpha + 1) * np.pi / 2)
+        for alpha, omega in enumerate(photon_energies)]
 
 # Print the parameters
 utils.message_output("Parameters:\n", "output")
@@ -107,7 +109,7 @@ utils.message_output("\n", "output")
 # 1. GET QED HAMILTONIAN
 h_el, h_ph, h_int, h_qed = utils.get_h_qed(electron_eigenvalues, photon_energies, lm_couplings)
 # 2. DEFINE THE OPERATORS to be measured
-observables: list[MixedOp] = []
+observables: List[MixedOp] = []
 if "energy" in observables_requested:
     observables.append(h_qed) # Total energy
     observables.append(MixedOp({("F"): [(1.0, h_el)]})) # Electron energy
