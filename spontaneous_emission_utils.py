@@ -2,6 +2,7 @@ from typing import List, Literal
 import numpy as np
 from qiskit import (QuantumCircuit, transpile)
 from qiskit.circuit.library import PauliEvolutionGate
+from qiskit.circuit.quantumregister import Qubit
 from qiskit.primitives import Estimator
 from qiskit.providers import Backend
 from qiskit.quantum_info import SparsePauliOp, Statevector
@@ -193,6 +194,40 @@ def custom_time_evolve(h_mapped: SparsePauliOp,
             backend)
     raise ValueError("Invalid evolution strategy")
 
+def count_gates(qc: QuantumCircuit) -> dict[Qubit, int]:
+    """
+    This method counts the number of gates acting on each qubit of the circuit.
+
+    Args:
+        qc: The quantum circuit to be analyzed.
+
+    Returns:
+        A dictionary containing the number of gates acting on each qubit of the circuit.
+    """
+    gate_count: dict[Qubit, int] = { qubit: 0 for qubit in qc.qubits }
+    for gate in qc.data:
+        for qubit in gate.qubits:
+            gate_count[qubit] += 1
+    return gate_count
+
+def remove_idle_wires(qc: QuantumCircuit) -> QuantumCircuit:
+    """
+    This method removes the idle wires from the circuit. An idle wire is a qubit that has no gates,
+    i.e. the number of gates acting on the qubit is zero.
+
+    Args:
+        qc: The quantum circuit to be analyzed.
+
+    Returns:
+        A QuantumCircuit with the idle wires removed.
+    """
+    qc_out = qc.copy()
+    gate_count = count_gates(qc_out)
+    for qubit, count in gate_count.items():
+        if count == 0:
+            qc_out.qubits.remove(qubit)
+    return qc_out
+
 def optimize_obervables(observables: List[SparsePauliOp],
                         circuit: QuantumCircuit) -> List[SparsePauliOp]:
     """
@@ -214,6 +249,35 @@ def optimize_obervables(observables: List[SparsePauliOp],
             # For each term, we need to map the qubit indices to the new layout
             for idx, i in enumerate(final_index_layout):
                 optimized_op[i] = op[len(final_index_layout) - 1 - idx]
+            optimized_observable.append(("".join(optimized_op)[::-1], coeff))
+        optimized_observables.append(SparsePauliOp.from_list(optimized_observable))
+    return optimized_observables
+
+def remove_idle_qubit_from_obervables(observables: List[SparsePauliOp],
+                        circuit: QuantumCircuit) -> List[SparsePauliOp]:
+    """
+    This method optimizes the observables to match the new qubit layout.
+    Args:
+        observables: The observables to be optimized.
+        circuit: The circuit with the new qubit layout, as obtained from the transpiler.
+    Returns:
+        A list containing the optimized observables.
+    """
+    optimized_observables: List[SparsePauliOp] = []
+    # First loop over the observables that should be computed
+    for _, observable in enumerate(observables):
+        optimized_observable: List[tuple[str, complex | np.complex128]] = []
+        # Then loop over the terms of the observable. These are the Pauli strings (e.g. 'IIIZ')
+        for op, coeff in observable.to_list():
+            optimized_op: List[str] = ["I"] * circuit.num_qubits
+            # For each term, we need to map the qubit indexes to the new layout
+            # `circuit.qubits` is an ordered list of the qubits in the circuit. The first element
+            # represents the most significant qubit
+            for idx, qubit in enumerate(circuit.qubits):
+                # Get info about this qubit. The index represents the position of the qubit in the
+                # string with the original number of qubits
+                qubit_idx: int = circuit.find_bit(qubit).index
+                optimized_op[idx] = op[len(op) - 1 - qubit_idx]
             optimized_observable.append(("".join(optimized_op)[::-1], coeff))
         optimized_observables.append(SparsePauliOp.from_list(optimized_observable))
     return optimized_observables
@@ -341,6 +405,16 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
         # Then, transpile the combined circuit
         optimized_circuit: QuantumCircuit = \
             transpile(evolved_state, backend, optimization_level=optimization_level)
+
+        # Optimize the observables
+        optimized_observables: List[SparsePauliOp] = \
+            optimize_obervables(observables, optimized_circuit)
+
+        # Remove unused qubits from circuit description
+        optimized_circuit = remove_idle_wires(optimized_circuit)
+        optimized_observables = \
+            remove_idle_qubit_from_obervables(optimized_observables, optimized_circuit)
+
         # Save circuit (only for the first two steps because after that it gets too long)
         if idx < 2 and optimized_circuit.num_qubits <= 8:
             optimized_circuit.draw(output="mpl", filename=f"results/circuits/circuit_t_{t:.4f}.png")
@@ -349,9 +423,7 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
         operations = optimized_circuit.count_ops()
         for op in operations:
             message_output(f"{op}: {operations[op]}\n", "output")
-        # Optimize the observables
-        optimized_observables: List[SparsePauliOp] = \
-            optimize_obervables(observables, optimized_circuit)
+
         # Get the observables at time t
         observables_result.append(
             estimate_observables(estimator, optimized_circuit, optimized_observables, None, 1e-12)
