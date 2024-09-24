@@ -1,5 +1,6 @@
 from typing import List, Literal
 import numpy as np
+import numpy.typing as npt
 from qiskit import (QuantumCircuit, transpile)
 from qiskit.circuit.library import PauliEvolutionGate
 from qiskit.circuit.quantumregister import Qubit
@@ -76,6 +77,58 @@ def get_h_qed(el_eigenvals: List[float],
             ("B",): [(1.0, h_ph)],
         }
     ) + h_int
+    return h_el, h_ph, h_int, h_qed
+
+def get_h_qed_gauss(el_eigenvals: List[float],
+                    number_of_gaussians: int,
+                    gaussian_diag_coeffs: npt.NDArray,
+                    gaussian_bilinear_coeffs: npt.NDArray,
+                    diag_threshold: np.float64,
+                    bilinear_threshold: np.float64) -> tuple[FermionicOp, BosonicOp, MixedOp, MixedOp]:
+    """"
+    This method generates the QED Hamiltonian for a given set of electron eigenvalues,
+    photon energies and light-matter couplings.
+
+    Args:
+    el_eigenvals: The electron eigenvalues (in Hartree).
+    """
+    # The QED Hamiltonian is componsed of three terms, the uncoupled electron Hamiltonian,
+    # the uncoupled photon Hamiltonian and the interaction Hamiltonian.
+    # First, generate the uncoupled electron Hamiltonian
+    h_el = FermionicOp({})
+    for i, eigenval in enumerate(el_eigenvals):
+        h_el += FermionicOp({f'+_{i} -_{i}': eigenval}, num_spin_orbitals=len(el_eigenvals))
+    # Next, generate the uncoupled photon Hamiltonian
+    h_ph = BosonicOp({})
+    for i in range(number_of_gaussians):
+        for j in range(number_of_gaussians):
+            if np.abs(gaussian_diag_coeffs[i, j]) > diag_threshold * np.abs(gaussian_diag_coeffs[i, i]):
+                h_ph += gaussian_diag_coeffs[i, j] *\
+                    BosonicOp({'': 0.5, f'+_{i} -_{j}': 1}, num_modes=number_of_gaussians)
+    # Finally, generate the interaction Hamiltonian
+    max_coupling = np.max(np.abs(gaussian_bilinear_coeffs))
+    h_int = MixedOp({})
+    for i, eigenval in enumerate(el_eigenvals):
+        for j, eigenval in enumerate(el_eigenvals):
+            if j >= i:
+                continue
+            absorption_op = FermionicOp({f'+_{i} -_{j}': 1}, num_spin_orbitals=len(el_eigenvals))
+            emission_op = FermionicOp({f'+_{j} -_{i}': 1}, num_spin_orbitals=len(el_eigenvals))
+            ph_creation = BosonicOp({})
+            ph_annihilation = BosonicOp({})
+            for k in range(number_of_gaussians):
+                if np.abs(gaussian_bilinear_coeffs[k]) > np.abs(bilinear_threshold * max_coupling):
+                    ph_creation += BosonicOp({f'+_{k}': gaussian_bilinear_coeffs[k]}, num_modes=number_of_gaussians)
+                    ph_annihilation += BosonicOp({f'-_{k}': gaussian_bilinear_coeffs[k]}, num_modes=number_of_gaussians)
+            # Build the interaction
+            h_int += MixedOp({
+                ("F", "B"): [(1., absorption_op, ph_annihilation), (1., emission_op, ph_creation)],
+            })
+    # Finally, put it all together
+    h_qed = MixedOp({
+        ("F",): [(1.0, h_el)],
+        ("B",): [(1.0, h_ph)],
+    }) + h_int
     return h_el, h_ph, h_int, h_qed
 
 def get_mapper(number_of_modes: int, number_of_fock_states: int) -> MixedMapper:
