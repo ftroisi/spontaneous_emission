@@ -87,6 +87,10 @@ with open('input', 'r', encoding="UTF-8") as f:
             number_of_modes = int(value[1].replace(' ', ''))
         elif value[0].replace(' ', '') == "number_of_gaussians":
             number_of_gaussians = int(value[1].replace(' ', ''))
+        elif value[0].replace(' ', '') == "diag_threshold":
+            diag_threshold = float(value[1].replace(' ', ''))
+        elif value[0].replace(' ', '') == "bilinear_threshold":
+            bilinear_threshold = float(value[1].replace(' ', ''))
         # Time evolution parameters
         elif value[0].replace(' ', '') == "delta_t":
             delta_t = float(value[1].replace(' ', ''))
@@ -173,11 +177,6 @@ for i in range(number_of_gaussians):
         gaussian_diag_coeffs[i, j] = np.sum(photon_energies * coeffs[:, i] * coeffs[:, j])
 diag_coeff_mask = (np.abs(gaussian_diag_coeffs) >= diag_threshold * gaussian_diag_coeffs[0, 0]).astype(int)
 
-visualize_matrix(gaussian_diag_coeffs, 'real')
-# plt.plot(gaussian_bilinear_coeffs)
-# plt.grid(True)
-# plt.show()
-
 h_el, h_ph, h_int, h_qed = utils.get_h_qed_gauss(
     electron_eigenvalues, number_of_gaussians, gaussian_diag_coeffs, gaussian_bilinear_coeffs, diag_threshold, bilinear_threshold)
 # 2. DEFINE THE OPERATORS to be measured
@@ -224,7 +223,6 @@ if "ph_correlation" in observables_requested:
 mixed_papper = utils.get_mapper(number_of_gaussians, number_of_fock_states)
 # 4. MAP THE HAMILTONIAN AND OBSERVABLES
 hqed_mapped = mixed_papper.map(h_qed)
-print(hqed_mapped.num_qubits, number_of_gaussians, len(observables))
 observables_mapped = [mixed_papper.map(op) for op in observables]
 # 5. DEFINE THE INITIAL STATE: The matter is in the excited state, the photons in the vacuum state
 init_state: dict[int, tuple[complex | np.complex128, complex | np.complex128]] = {}
