@@ -1,10 +1,9 @@
 import sys
 import time
 import os
+from typing import List, Literal
 import numpy as np
 import matplotlib.pyplot as plt
-
-from typing import List, Literal
 
 from qiskit_nature.second_q.operators import BosonicOp, FermionicOp, MixedOp
 from qiskit.providers.fake_provider import GenericBackendV2
@@ -240,10 +239,9 @@ backend = GenericBackendV2(num_qubits=hqed_mapped.num_qubits)
 utils.message_output(
     f"Starting time evolution with delta_t = {delta_t} and final_time = {final_time}\n", "output")
 start_time = time.time()
+estimator = Estimator()
+estimator.set_options(shots=None)
 result: utils.TimeEvolutionResult = utils.custom_time_evolve(
     hqed_mapped, observables_mapped, init_state, time_evolution_strategy,
-    time_evolution_synthesis, optimization_level, backend, Estimator(), final_time, delta_t)
+    time_evolution_synthesis, optimization_level, backend, estimator, final_time, delta_t)
 utils.message_output(f"Time elapsed: {time.time() - start_time}s", "output")
-# 8. Save results
-observables_result = np.array(np.array(result.observables)[:, :, 0])
-np.savez("results/time_evolution", times=result.times, observables=observables_result)

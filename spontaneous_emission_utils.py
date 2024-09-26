@@ -414,6 +414,7 @@ def transpile_combine_strategy(single_step_evolution_circuit: QuantumCircuit,
             1e-12
         )]
     # 6. Time evolution
+    curr_time: List[float] = [0.0]
     for idx, t in enumerate(time):
         message_output(f"Time step {idx + 1}/{len(time)}\n", "output")
         optimized_circuit.compose(single_step_evolution_circuit_optimized, inplace=True)
@@ -436,11 +437,14 @@ def transpile_combine_strategy(single_step_evolution_circuit: QuantumCircuit,
                 1e-12
             )
         )
+        # Save the results at each timestep
+        curr_time.append(t)
+        result = TimeEvolutionResult(
+            optimized_circuit, observables_result[-1], observables_result, times=np.array(curr_time))
+        np.savez("results/time_evolution", times=result.times, observables=np.array(np.array(result.observables)[:, :, 0]))
     # Return the result
-    return TimeEvolutionResult(optimized_circuit,
-                                observables_result[-1],
-                                observables_result,
-                                times=np.array([0.0] + time))
+    return TimeEvolutionResult(
+        optimized_circuit, observables_result[-1], observables_result, times=np.array(curr_time))
 
 def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
                                initial_state: dict[
@@ -461,13 +465,15 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
         estimate_observables(estimator, evolved_state, observables, None, 1e-12)
     ]
     # 3. Time evolution
+    curr_time: List[float] = [0.0]
     for idx, t in enumerate(time):
         message_output(f"Time step {idx + 1}/{len(time)}\n", "output")
         # First, compose the unoptimized circuit
         evolved_state.compose(single_step_evolution_circuit, inplace=True)
         # Save circuit (only for the first two steps because after that it gets too long)
         if idx < 2 and evolved_state.num_qubits <= 8:
-            evolved_state.decompose(reps=2).draw(output="mpl", filename=f"results/circuits/circuit_raw_t_{t:.4f}.png")
+            evolved_state.decompose(reps=2)\
+                .draw(output="mpl", filename=f"results/circuits/circuit_raw_t_{t:.4f}.png")
         # Then, transpile the combined circuit
         optimized_circuit: QuantumCircuit = \
             transpile(evolved_state, backend, optimization_level=optimization_level)
@@ -494,11 +500,14 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
         observables_result.append(
             estimate_observables(estimator, optimized_circuit, optimized_observables, None, 1e-12)
         )
+        # Save the results at each timestep
+        curr_time.append(t)
+        result = TimeEvolutionResult(
+            optimized_circuit, observables_result[-1], observables_result, times=np.array(curr_time))
+        np.savez("results/time_evolution", times=result.times, observables=np.array(np.array(result.observables)[:, :, 0]))
     # Return the result
-    return TimeEvolutionResult(evolved_state,
-                                observables_result[-1],
-                                observables_result,
-                                times=np.array([0.0] + time))
+    return TimeEvolutionResult(
+        optimized_circuit, observables_result[-1], observables_result, times=np.array(curr_time))
 
 def transpile_combine_transpile_strategy(
         single_step_evolution_circuit: QuantumCircuit,
@@ -535,6 +544,7 @@ def transpile_combine_transpile_strategy(
             1e-12
         )]
     # 6. Time evolution
+    curr_time: List[float] = [0.0]
     for idx, t in enumerate(time):
         message_output(f"Time step {idx + 1}/{len(time)}\n", "output")
         # 1. Compose the unoptimized circuit
@@ -557,8 +567,11 @@ def transpile_combine_transpile_strategy(
         observables_result.append(
             estimate_observables(estimator, optimized_circuit, optimized_observables, None, 1e-12)
         )
+        # Save the results at each timestep
+        curr_time.append(t)
+        result = TimeEvolutionResult(
+            optimized_circuit, observables_result[-1], observables_result, times=np.array(curr_time))
+        np.savez("results/time_evolution", times=result.times, observables=np.array(np.array(result.observables)[:, :, 0]))
     # Return the result
-    return TimeEvolutionResult(optimized_circuit,
-                                observables_result[-1],
-                                observables_result,
-                                times=np.array([0.0] + time))
+    return TimeEvolutionResult(
+        optimized_circuit, observables_result[-1], observables_result, times=np.array(curr_time))
