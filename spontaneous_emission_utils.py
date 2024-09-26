@@ -83,14 +83,22 @@ def get_h_qed_gauss(el_eigenvals: List[float],
                     number_of_gaussians: int,
                     gaussian_diag_coeffs: npt.NDArray,
                     gaussian_bilinear_coeffs: npt.NDArray,
-                    diag_threshold: np.float64,
+                    gaussian_interaction_type: Literal['nn', '2nn', '3nn'],
                     bilinear_threshold: np.float64) -> tuple[FermionicOp, BosonicOp, MixedOp, MixedOp]:
     """"
     This method generates the QED Hamiltonian for a given set of electron eigenvalues,
     photon energies and light-matter couplings.
 
     Args:
-    el_eigenvals: The electron eigenvalues (in Hartree).
+        el_eigenvals: The electron eigenvalues (in Hartree).
+        number_of_gaussians: The number of localized Gaussians used to represent the photon modes.
+        gaussian_diag_coeffs: The coefficients of the Gaussian Gaussian interaction
+            (i.e. the diagonal terms of the photon Hamiltonian).
+        gaussian_bilinear_coeffs: The coefficients of the Gaussian-matter interaction
+            (i.e. the bilinear terms of the photon Hamiltonian).
+        gaussian_interaction_type: The type of Gaussian interaction to be used
+            (Nearest neighbor, 2nd nearest neighbor, 3rd nearest neighbor)
+        bilinear_threshold: The threshold to consider a bilinear term in the interaction.
     """
     # The QED Hamiltonian is componsed of three terms, the uncoupled electron Hamiltonian,
     # the uncoupled photon Hamiltonian and the interaction Hamiltonian.
@@ -99,14 +107,16 @@ def get_h_qed_gauss(el_eigenvals: List[float],
     for i, eigenval in enumerate(el_eigenvals):
         h_el += FermionicOp({f'+_{i} -_{i}': eigenval}, num_spin_orbitals=len(el_eigenvals))
     # Next, generate the uncoupled photon Hamiltonian
+    neighbors = range(-1, 2) if gaussian_interaction_type == 'nn' else \
+        range(-2, 3) if gaussian_interaction_type == '2nn' else range(-3, 4)
     h_ph = BosonicOp({})
     for i in range(number_of_gaussians):
-        for j in range(number_of_gaussians):
-            if np.abs(gaussian_diag_coeffs[i, j]) > diag_threshold * np.abs(gaussian_diag_coeffs[i, i]):
-                h_ph += gaussian_diag_coeffs[i, j] *\
-                    BosonicOp({'': 0.5, f'+_{i} -_{j}': 1}, num_modes=number_of_gaussians)
+        for j in neighbors:
+            if i + j >= 0 and i + j < number_of_gaussians:
+                h_ph += gaussian_diag_coeffs[i, i+j] * \
+                    BosonicOp({f'+_{i} -_{i+j}': 1}, num_modes=number_of_gaussians)
     # Finally, generate the interaction Hamiltonian
-    max_coupling = np.max(np.abs(gaussian_bilinear_coeffs))
+    max_coupling: np.float64 = np.max(np.abs(gaussian_bilinear_coeffs))
     h_int = MixedOp({})
     for i, eigenval in enumerate(el_eigenvals):
         for j, eigenval in enumerate(el_eigenvals):
@@ -455,6 +465,9 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
         message_output(f"Time step {idx + 1}/{len(time)}\n", "output")
         # First, compose the unoptimized circuit
         evolved_state.compose(single_step_evolution_circuit, inplace=True)
+        # Save circuit (only for the first two steps because after that it gets too long)
+        if idx < 2 and evolved_state.num_qubits <= 8:
+            evolved_state.decompose(reps=2).draw(output="mpl", filename=f"results/circuits/circuit_raw_t_{t:.4f}.png")
         # Then, transpile the combined circuit
         optimized_circuit: QuantumCircuit = \
             transpile(evolved_state, backend, optimization_level=optimization_level)
