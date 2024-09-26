@@ -117,7 +117,7 @@ if "energy" in observables_requested:
     observables.append(h_int) # Interaction energy
 if "particle_number" in observables_requested:
     observables.append(MixedOp({("F"): [
-        # Electron number in mode 1
+        # Electron number in excited state
         (1.0, FermionicOp({"+_1 -_1": 1}, num_spin_orbitals=len(electron_eigenvalues)))]}))
     for i in range(number_of_modes):
         # Photon number in mode i
@@ -172,10 +172,9 @@ else:
 utils.message_output(
     f"Starting time evolution with delta_t = {delta_t} and final_time = {final_time}\n", "output")
 start_time = time.time()
+estimator = Estimator()
+estimator.set_options(shots=None)
 result: utils.TimeEvolutionResult = utils.custom_time_evolve(
     hqed_mapped, observables_mapped, init_state, time_evolution_strategy,
-    time_evolution_synthesis, optimization_level, backend, Estimator(), final_time, delta_t)
+    time_evolution_synthesis, optimization_level, backend, estimator, final_time, delta_t)
 utils.message_output(f"Time elapsed: {time.time() - start_time}s", "output")
-# 8. Save results
-observables_result = np.array(np.array(result.observables)[:, :, 0])
-np.savez("results/time_evolution", times=result.times, observables=observables_result)
