@@ -15,6 +15,7 @@ from qiskit_algorithms.observables_evaluator import estimate_observables
 from qiskit_nature.second_q.mappers import (BosonicLogarithmicMapper,
                                             BravyiKitaevMapper, MixedMapper)
 from qiskit_nature.second_q.operators import BosonicOp, FermionicOp, MixedOp
+from qat.interop.qiskit import qiskit_to_qlm
 
 np.set_printoptions(precision=6, suppress=True)
 
@@ -423,6 +424,10 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
         operations = optimized_circuit.count_ops()
         for op in operations:
             message_output(f"{op}: {operations[op]}\n", "output")
+
+        qlm_circuit = qiskit_to_qlm(optimized_circuit, sep_measures=True)[0]
+        file_name = f"results/circuits/circuit_qlm_t_{t:.4f}.circ"
+        qlm_circuit.dump(file_name)
 
         # Get the observables at time t
         observables_result.append(
