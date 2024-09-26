@@ -4,7 +4,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from typing import List
+from typing import List, Literal
 
 from qiskit_nature.second_q.operators import BosonicOp, FermionicOp, MixedOp
 from qiskit.providers.fake_provider import GenericBackendV2
@@ -21,7 +21,7 @@ electron_eigenvalues: List[float] = [-0.6738, -0.2798]
 photon_energies = []
 number_of_modes: int | None = None
 number_of_gaussians: int | None = None
-diag_threshold: float = 0.09 # 10% of the diagonal element
+gaussian_interaction_type: Literal['nn', '2nn', '3nn'] = 'nn' # Nearest neighbor, 2nd nearest neighbor, 3rd nearest neighbor
 bilinear_threshold: float = 0.1 # 10% of the bilinear element
 cavity_length: float = 1.0
 number_of_fock_states: int = 1
@@ -87,8 +87,8 @@ with open('input', 'r', encoding="UTF-8") as f:
             number_of_modes = int(value[1].replace(' ', ''))
         elif value[0].replace(' ', '') == "number_of_gaussians":
             number_of_gaussians = int(value[1].replace(' ', ''))
-        elif value[0].replace(' ', '') == "diag_threshold":
-            diag_threshold = float(value[1].replace(' ', ''))
+        elif value[0].replace(' ', '') == "gaussian_interaction_type":
+            gaussian_interaction_type = value[1].replace(' ', '')
         elif value[0].replace(' ', '') == "bilinear_threshold":
             bilinear_threshold = float(value[1].replace(' ', ''))
         # Time evolution parameters
@@ -175,10 +175,10 @@ for i in range(number_of_gaussians):
     gaussian_bilinear_coeffs[i] = np.sum(couplings * coeffs[:, i])
     for j in range(number_of_gaussians):
         gaussian_diag_coeffs[i, j] = np.sum(photon_energies * coeffs[:, i] * coeffs[:, j])
-diag_coeff_mask = (np.abs(gaussian_diag_coeffs) >= diag_threshold * gaussian_diag_coeffs[0, 0]).astype(int)
 
 h_el, h_ph, h_int, h_qed = utils.get_h_qed_gauss(
-    electron_eigenvalues, number_of_gaussians, gaussian_diag_coeffs, gaussian_bilinear_coeffs, diag_threshold, bilinear_threshold)
+    electron_eigenvalues, number_of_gaussians, gaussian_diag_coeffs, gaussian_bilinear_coeffs, gaussian_interaction_type, bilinear_threshold)
+utils.message_output(str(h_qed), "output")
 # 2. DEFINE THE OPERATORS to be measured
 observables: List[MixedOp] = []
 if "energy" in observables_requested:
@@ -192,17 +192,20 @@ if "particle_number" in observables_requested:
         (1.0, FermionicOp({"+_1 -_1": 1}, num_spin_orbitals=len(electron_eigenvalues)))]}))
     # Recompute the gaussian diagonal coeffs (without the frequency)
     gaussian_diag_coeffs = np.zeros((number_of_gaussians, number_of_gaussians))
+    neighbors = range(-1, 2) if gaussian_interaction_type == 'nn' else \
+        range(-2, 3) if gaussian_interaction_type == '2nn' else range(-3, 4)
     for i in range(number_of_gaussians):
-        for j in range(number_of_gaussians):
-            gaussian_diag_coeffs[i, j] = np.sum(coeffs[:, i] * coeffs[:, j])
+        for j in neighbors:
+            if i + j >= 0 and i + j < number_of_gaussians:
+                gaussian_diag_coeffs[i, i+j] = np.sum(coeffs[:, i] * coeffs[:, i+j])
     # Expand the particle operator for each plane wave in the new basis
     for i in range(number_of_modes):
         # Photon number in mode i
         ph_num = BosonicOp({})
         for i in range(number_of_gaussians):
-            for j in range(number_of_gaussians):
-                if diag_coeff_mask[i, j] > np.finfo(float).eps:
-                    ph_num += BosonicOp({f'+_{i} -_{j}': gaussian_diag_coeffs[i, j]}, num_modes=number_of_gaussians)
+            for j in neighbors:
+                if i + j >= 0 and i + j < number_of_gaussians:
+                    ph_num += BosonicOp({f'+_{i} -_{i+j}': gaussian_diag_coeffs[i, i+j]}, num_modes=number_of_gaussians)
         observables.append(MixedOp({("B"): [(1.0, ph_num)]}))
 if "ph_correlation" in observables_requested:
     # Photon correlation between modes i and j
