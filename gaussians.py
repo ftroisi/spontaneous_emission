@@ -121,28 +121,34 @@ if len(photon_energies) == 0 and number_of_modes is None:
 if len(photon_energies) == 0:
     photon_energies = [np.pi * C * (alpha + 1) / cavity_length for alpha in range(number_of_modes)]
 number_of_modes: int = len(photon_energies)
+lm_couplings: List[np.float64] = \
+    [30*np.sqrt(omega / cavity_length) * np.sin((2*alpha + 1) * np.pi / 2) if alpha % 2 == 0 else 0
+        for alpha, omega in enumerate(photon_energies)]
 # Define data for the gaussians
 x_data = np.arange(-cavity_length/2, cavity_length/2, 0.1)
-sigma = cavity_length / (3.5*number_of_gaussians)
-mu = list(np.linspace(-cavity_length/2 + 3*sigma, cavity_length/2 - 3*sigma, number_of_gaussians))
+sigma = cavity_length / (4*number_of_gaussians)
+mu = list(np.linspace(-cavity_length/2 + 2.5*sigma, cavity_length/2 - 2.5*sigma, number_of_gaussians))
 
 # Define the Gaussian function
 def gaussian(x, x0, sigma0):
     """Single Gaussian function."""
     return np.exp(-((x - x0) ** 2) / (2 * sigma0 ** 2))
 
-def get_lm_coupling(k):
-    """Get the coupling for a given mode."""
-    if k % 2 == 0:
-        return 0
-    return np.sqrt(photon_energies[k - 1] / cavity_length)
-
 # Define the cavity mode to approximate (e.g., standing wave: cos(kx) or sin(kx))
 def plane_wave(x, k):
     """Plane wave function (standing wave in a cavity)."""
     if k % 2 == 0:
-        return photon_energies[k - 1] * np.sin((k*np.pi)/cavity_length * x)  # photon_energies[k - 1] * np.sin((k*np.pi)/cavity_length * x)
-    return photon_energies[k - 1] * np.cos((k*np.pi)/cavity_length * x)
+        return photon_energies[k] * np.cos(((k + 1) * np.pi) / cavity_length * x)
+    return photon_energies[k] * np.sin(((k + 1) * np.pi) / cavity_length * x)
+
+# Print the parameters
+utils.message_output("Parameters:\n", "output")
+utils.message_output(f"Electron eigenvalues: {electron_eigenvalues}\n", "output")
+for i in range(number_of_modes):
+    utils.message_output(
+        f"Photon mode {i + 1}: Energy: {photon_energies[i]} H.a.; LM coupling: {lm_couplings[i]}\n",
+        "output")
+utils.message_output("\n", "output")
 
 # Plot the Gaussians
 if False:
@@ -153,10 +159,18 @@ if False:
     plt.grid(True)
     plt.show()
 
+if False:
+    plt.figure(figsize=(10, 6))
+    for i in range(1,number_of_modes,2):
+        plt.plot(x_data, plane_wave(x_data, i), label=f"Plane wave {i+1}")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
 # Define the overlap integrals bvetween a plane wave and a Gaussian
 coeffs = np.zeros((number_of_modes, number_of_gaussians))
 for i in range(number_of_modes):
-    plane_w = plane_wave(x_data, i + 1)
+    plane_w = plane_wave(x_data, i)
     normalized_pn = plane_w / np.linalg.norm(plane_w)
     for j in range(number_of_gaussians):
         gauss = gaussian(x_data, mu[j], sigma)
@@ -170,8 +184,7 @@ for i in range(number_of_modes):
 gaussian_diag_coeffs = np.zeros((number_of_gaussians, number_of_gaussians))
 gaussian_bilinear_coeffs = np.zeros((number_of_gaussians))
 for i in range(number_of_gaussians):
-    couplings = [get_lm_coupling(k + 1) for k in range(number_of_modes)]
-    gaussian_bilinear_coeffs[i] = np.sum(couplings * coeffs[:, i])
+    gaussian_bilinear_coeffs[i] = np.sum(lm_couplings * coeffs[:, i])
     for j in range(number_of_gaussians):
         gaussian_diag_coeffs[i, j] = np.sum(photon_energies * coeffs[:, i] * coeffs[:, j])
 

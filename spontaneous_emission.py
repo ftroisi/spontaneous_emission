@@ -89,12 +89,17 @@ with open('input', 'r', encoding="UTF-8") as f:
 if len(photon_energies) == 0 and number_of_modes is None:
     raise ValueError("If photon_energies is not provided, number_of_modes must be provided")
 if len(photon_energies) == 0:
-    photon_energies = [np.pi * C * 1 / cavity_length for alpha in range(1,2*number_of_modes,2)]
-number_of_modes: int = len(photon_energies)
+    photon_energies = [np.pi * C * (alpha + 1) / cavity_length for alpha in range(number_of_modes)]
 # g_a = sqrt(omega_a / L) * sin(a * pi / 2)
 lm_couplings: List[np.float64] = \
-    [20*np.sqrt(omega / cavity_length) * np.sin((2*alpha + 1) * np.pi / 2)
+    [30*np.sqrt(omega / cavity_length) * np.sin((2*alpha + 1) * np.pi / 2) if alpha % 2 == 0 else 0
         for alpha, omega in enumerate(photon_energies)]
+
+# Remove modes with zero coupling
+valid_modes = np.where(np.array(lm_couplings) != 0)[0]
+number_of_modes: int = len(valid_modes)
+photon_energies = [photon_energies[mode] for mode in valid_modes]
+lm_couplings = [lm_couplings[mode] for mode in valid_modes]
 
 # Print the parameters
 utils.message_output("Parameters:\n", "output")
