@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 
 from qiskit_nature.second_q.operators import BosonicOp, FermionicOp, MixedOp
 from qiskit.providers.fake_provider import GenericBackendV2
+from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit.primitives import Estimator
 
 sys.path.append('./')
@@ -241,7 +242,24 @@ for n in range(number_of_gaussians):
 init_state[number_of_gaussians] = (np.complex128(1), np.complex128(0))
 init_state[number_of_gaussians + 1] = (np.complex128(0), np.complex128(1))
 # 6. DEFINE THE HARDWARE
-backend = GenericBackendV2(num_qubits=hqed_mapped.num_qubits)
+if hardware == "generic_simulator":
+    backend = GenericBackendV2(num_qubits=hqed_mapped.num_qubits)
+else:
+    try:
+        # First, get the token
+        token: str | None = None
+        with open("ibm_token", "r", encoding="UTF-8") as f:
+            token = f.readline().split("\n")[0]
+            f.close()
+        # Then, get the available backends
+        service = QiskitRuntimeService(channel="ibm_quantum", token=token)
+        service.backends(simulator=False)
+        # Finally, pick the select the backend
+        backend = service.backend(hardware)
+        utils.message_output(f"Backend: {hardware}. Num qubits = {backend.num_qubits}\n", "output")
+    except ValueError as e:
+        backend = GenericBackendV2(num_qubits=hqed_mapped.num_qubits)
+        utils.message_output(f"Error: {e}. Using generic BE instead\n", "output")
 # 7. Time evolve
 utils.message_output(
     f"Starting time evolution with delta_t = {delta_t} and final_time = {final_time}\n", "output")
