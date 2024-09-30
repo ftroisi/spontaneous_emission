@@ -202,22 +202,17 @@ if "particle_number" in observables_requested:
     observables.append(MixedOp({("F"): [
         # Electron number in mode 1
         (1.0, FermionicOp({"+_1 -_1": 1}, num_spin_orbitals=len(electron_eigenvalues)))]}))
-    # Recompute the gaussian diagonal coeffs (without the frequency)
-    gaussian_diag_coeffs = np.zeros((number_of_gaussians, number_of_gaussians))
     neighbors = range(-1, 2) if gaussian_interaction_type == 'nn' else \
         range(-2, 3) if gaussian_interaction_type == '2nn' else range(-3, 4)
-    for i in range(number_of_gaussians):
-        for j in neighbors:
-            if i + j >= 0 and i + j < number_of_gaussians:
-                gaussian_diag_coeffs[i, i+j] = np.sum(coeffs[:, i] * coeffs[:, i+j])
     # Expand the particle operator for each plane wave in the new basis
-    for i in range(number_of_modes):
+    for n in range(number_of_modes):
         # Photon number in mode i
         ph_num = BosonicOp({})
         for i in range(number_of_gaussians):
             for j in neighbors:
                 if i + j >= 0 and i + j < number_of_gaussians:
-                    ph_num += BosonicOp({f'+_{i} -_{i+j}': gaussian_diag_coeffs[i, i+j]}, num_modes=number_of_gaussians)
+                    ph_num += BosonicOp({f'+_{i} -_{i+j}': np.conj(coeffs[n, i]) * coeffs[n, i+j]},
+                                        num_modes=number_of_gaussians)
         observables.append(MixedOp({("B"): [(1.0, ph_num)]}))
 if "ph_correlation" in observables_requested:
     # Photon correlation between modes i and j
@@ -233,7 +228,6 @@ if "ph_correlation" in observables_requested:
             # Then, we put them all together
             observables.append(MixedOp(
                 {("B"): [(prefactor, op1), (prefactor, op2), (prefactor, op3), (prefactor, op4)]}))
-
 # 3. DEFINE THE MAPPERS
 mixed_papper = utils.get_mapper(number_of_gaussians, number_of_fock_states)
 # 4. MAP THE HAMILTONIAN AND OBSERVABLES
