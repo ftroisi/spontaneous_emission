@@ -123,7 +123,7 @@ if len(photon_energies) == 0:
     photon_energies = [np.pi * C * (alpha + 1) / cavity_length for alpha in range(number_of_modes)]
 number_of_modes: int = len(photon_energies)
 lm_couplings: List[np.float64] = \
-    [30*np.sqrt(omega / cavity_length) * np.sin((2*alpha + 1) * np.pi / 2) if alpha % 2 == 0 else 0
+    [40*np.sqrt(omega / cavity_length) * np.sin((2*alpha + 1) * np.pi / 2) if alpha % 2 == 0 else 0
         for alpha, omega in enumerate(photon_energies)]
 # Define data for the gaussians
 x_data = np.arange(-cavity_length/2, cavity_length/2, 0.1)
