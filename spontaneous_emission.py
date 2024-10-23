@@ -5,11 +5,19 @@ import time
 from typing import List
 
 import numpy as np
-from qiskit.primitives import Estimator
+from qiskit.primitives import BackendEstimator
 from qiskit.providers.fake_provider import GenericBackendV2
-from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit_nature.second_q.operators import BosonicOp, FermionicOp, MixedOp
-
+IBM_RUNTIME_AVAILABLE = True
+try:
+    from qiskit_ibm_runtime import QiskitRuntimeService
+except ImportError:
+    IBM_RUNTIME_AVAILABLE = False
+IQM_RUNTIME_AVAILABLE = True
+try:
+    from mqp.qiskit_provider import MQPProvider
+except ImportError:
+    IQM_RUNTIME_AVAILABLE = False
 sys.path.append('./')
 import spontaneous_emission_utils as utils
 
@@ -159,26 +167,36 @@ if hardware == "generic_simulator":
     backend = GenericBackendV2(num_qubits=hqed_mapped.num_qubits)
 else:
     try:
-        # First, get the token
         token: str | None = None
-        with open("ibm_token", "r", encoding="UTF-8") as f:
-            token = f.readline().split("\n")[0]
-            f.close()
-        # Then, get the available backends
-        service = QiskitRuntimeService(channel="ibm_quantum", token=token)
-        service.backends(simulator=False)
-        # Finally, pick the select the backend
-        backend = service.backend(hardware)
-        utils.message_output(f"Backend: {hardware}. Num qubits = {backend.num_qubits}\n", "output")
+        if "ibm" in hardware:
+            # First, get the token
+            with open("ibm_token", "r", encoding="UTF-8") as f:
+                token = f.readline().split("\n")[0]
+                f.close()
+            # Then, get the available backends
+            service = QiskitRuntimeService(channel="ibm_quantum", token=token)
+            service.backends(simulator=False)
+            # Finally, pick the select the backend
+            backend = service.backend(hardware)
+        elif hardware == "QExa20":
+            # First, get the token
+            with open("lrz_token", "r", encoding="UTF-8") as f:
+                token = f.readline().split("\n")[0]
+                f.close()
+            # Then, get the available backends
+            provider = MQPProvider(token=token)
+            # Finally, pick the select the backend
+            backend = provider.backend(hardware)
     except ValueError as e:
         backend = GenericBackendV2(num_qubits=hqed_mapped.num_qubits)
         utils.message_output(f"Error: {e}. Using generic BE instead\n", "output")
+utils.message_output(f"Backend: {hardware}. Num qubits = {backend.num_qubits}\n", "output")
 # 7. Time evolve
 utils.message_output(
     f"Starting time evolution with delta_t = {delta_t} and final_time = {final_time}\n", "output")
 start_time = time.time()
-estimator = Estimator()
-estimator.set_options(shots=None)
+estimator = BackendEstimator(backend=backend)
+estimator.set_options(shots=None if hardware == "generic_simulator" else 1e4)
 result: utils.TimeEvolutionResult = utils.custom_time_evolve(
     hqed_mapped, observables_mapped, init_state, time_evolution_strategy,
     time_evolution_synthesis, optimization_level, backend, estimator, final_time, delta_t)

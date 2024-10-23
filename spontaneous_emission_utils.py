@@ -4,7 +4,7 @@ import numpy.typing as npt
 from qiskit import (QuantumCircuit, transpile)
 from qiskit.circuit.library import PauliEvolutionGate
 from qiskit.circuit.quantumregister import Qubit
-from qiskit.primitives import Estimator
+from qiskit.primitives import Estimator, BackendEstimator
 from qiskit.providers import Backend
 from qiskit.quantum_info import SparsePauliOp, Statevector
 from qiskit.synthesis import LieTrotter, SuzukiTrotter
@@ -187,7 +187,7 @@ def custom_time_evolve(h_mapped: SparsePauliOp,
                        evolution_synthesis: Literal["suzuki_trotter", "lie_trotter"],
                        optimization_level: int,
                        backend: Backend,
-                       estimator: Estimator,
+                       estimator: BackendEstimator,
                        final_time: float,
                        delta_t: float) -> TimeEvolutionResult:
     """"
@@ -386,7 +386,7 @@ def transpile_combine_strategy(single_step_evolution_circuit: QuantumCircuit,
                                observables: List[SparsePauliOp],
                                time: List[float],
                                optimization_level: int,
-                               estimator: Estimator,
+                               estimator: BackendEstimator,
                                backend: Backend) -> QuantumCircuit:
     """"
     This method combines the single step evolution circuit and transpiles the combined circuit.
@@ -452,7 +452,7 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
                                observables: List[SparsePauliOp],
                                time: List[float],
                                optimization_level: int,
-                               estimator: Estimator,
+                               estimator: BackendEstimator,
                                backend: Backend) -> QuantumCircuit:
     """"
     This method transpiles the combined circuit.
@@ -488,7 +488,7 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
             remove_idle_qubit_from_obervables(optimized_observables, optimized_circuit)
 
         # Save circuit (only for the first two steps because after that it gets too long)
-        if idx < 2 and optimized_circuit.num_qubits <= 8:
+        if idx < 2 and optimized_circuit.num_qubits <= 4:
             optimized_circuit.draw(output="mpl", filename=f"results/circuits/circuit_t_{t:.4f}.png")
         message_output(
         f"Circuit optimized with level: {optimization_level}. Operation count:\n", "output")
@@ -515,7 +515,7 @@ def transpile_combine_transpile_strategy(
         observables: List[SparsePauliOp],
         time: List[float],
         optimization_level: int,
-        estimator: Estimator,
+        estimator: BackendEstimator,
         backend: Backend) -> QuantumCircuit:
     """"
     This method combines the single step evolution circuit, transpiles the combined
