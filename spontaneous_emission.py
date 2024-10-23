@@ -5,7 +5,7 @@ import time
 from typing import List
 
 import numpy as np
-from qiskit.primitives import BackendEstimator
+from qiskit.primitives import BackendEstimator, Estimator
 from qiskit.providers.fake_provider import GenericBackendV2
 from qiskit_nature.second_q.operators import BosonicOp, FermionicOp, MixedOp
 IBM_RUNTIME_AVAILABLE = True
@@ -195,7 +195,7 @@ utils.message_output(f"Backend: {hardware}. Num qubits = {backend.num_qubits}\n"
 utils.message_output(
     f"Starting time evolution with delta_t = {delta_t} and final_time = {final_time}\n", "output")
 start_time = time.time()
-estimator = BackendEstimator(backend=backend)
+estimator = Estimator() if hardware == "generic_simulator" else BackendEstimator(backend=backend)
 estimator.set_options(shots=None if hardware == "generic_simulator" else 1e4)
 result: utils.TimeEvolutionResult = utils.custom_time_evolve(
     hqed_mapped, observables_mapped, init_state, time_evolution_strategy,
