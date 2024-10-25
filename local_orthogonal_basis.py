@@ -144,8 +144,6 @@ centers = list(np.linspace(
     -cavity_length/2 + 1/angular_coeff,
     cavity_length/2 - 1/angular_coeff,
     number_of_basis_functions))
-print(angular_coeff)
-print(centers)
 
 # Print the parameters
 utils.message_output("Parameters:\n", "output")
@@ -190,19 +188,17 @@ bilinear_coupling_tensor = np.zeros((number_of_basis_functions))
 for i in range(number_of_basis_functions):
     bilinear_coupling_tensor[i] = np.sum(lm_couplings * projections[:, i])
     for j in range(number_of_basis_functions):
-        uncoupled_photon_h_tensor[i, j] = np.sum(modes_energies * projections[:, i] * projections[:, j])
+        uncoupled_photon_h_tensor[i, j] = \
+            np.sum(modes_energies * projections[:, i] * projections[:, j])
 
-visualize_matrix(uncoupled_photon_h_tensor, type_to_plot='abs')
-plt.plot(bilinear_coupling_tensor)
-plt.show()
-
-h_el, h_ph, h_int, h_qed = utils.get_h_qed_gauss(
+h_el, h_ph, h_int, h_qed = utils.get_h_qed_gauss_localized_basis(
     electron_eigenvalues,
     number_of_basis_functions,
-    uncoupled_photon_h_tensor,
-    bilinear_coupling_tensor,
-    interaction_type,
-    bilinear_threshold)
+    overlap_tensor=np.diag(np.ones(number_of_basis_functions)),
+    uncoupled_photon_h_tensor=uncoupled_photon_h_tensor,
+    bilinear_coupling_tensor=bilinear_coupling_tensor,
+    interaction_type=interaction_type,
+    bilinear_threshold=bilinear_threshold)
 utils.message_output(str(h_qed), "output")
 # 2. DEFINE THE OPERATORS to be measured
 observables: List[MixedOp] = []
@@ -216,7 +212,8 @@ if "particle_number" in observables_requested:
         # Electron number in mode 1
         (1.0, FermionicOp({"+_1 -_1": 1}, num_spin_orbitals=len(electron_eigenvalues)))
     ]}))
-    neighbors = range(-1, 2) if interaction_type == 'nn' else range(-2, 3) if interaction_type == '2nn' else range(-3, 4)
+    neighbors = range(-1, 2) if interaction_type == 'nn' else range(-2, 3) \
+        if interaction_type == '2nn' else range(-3, 4)
     # Expand the particle operator for each plane wave in the new basis
     for n in range(number_of_modes):
         # Photon number in mode i
@@ -224,8 +221,9 @@ if "particle_number" in observables_requested:
         for i in range(number_of_basis_functions):
             for j in neighbors:
                 if i + j >= 0 and i + j < number_of_basis_functions:
-                    ph_num += BosonicOp({f'+_{i} -_{i+j}': np.conj(projections[n, i]) * projections[n, i+j]},
-                                        num_modes=number_of_basis_functions)
+                    ph_num += BosonicOp({
+                        f'+_{i} -_{i+j}': np.conj(projections[n, i]) * projections[n, i+j]
+                        }, num_modes=number_of_basis_functions)
         observables.append(MixedOp({("B"): [(1.0, ph_num)]}))
 if "ph_correlation" in observables_requested:
     # Photon correlation between modes i and j
