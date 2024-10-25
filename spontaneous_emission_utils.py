@@ -81,6 +81,7 @@ def get_h_qed_plane_waves(el_eigenvals: List[float],
 
 def get_h_qed_gauss_localized_basis(el_eigenvals: List[float],
                                     number_of_localized_functions: int,
+                                    overlap_tensor: npt.NDArray,
                                     uncoupled_photon_h_tensor: npt.NDArray,
                                     bilinear_coupling_tensor: npt.NDArray,
                                     interaction_type: Literal['nn', '2nn', '3nn'],
@@ -93,6 +94,7 @@ def get_h_qed_gauss_localized_basis(el_eigenvals: List[float],
     Args:
         el_eigenvals: The electron eigenvalues (in Hartree).
         number_of_localized_functions: Number of localized functions used to represent the modes.
+        overlap_tensor: The overlap tensor between the localized functions.
         uncoupled_photon_h_tensor: The coefficients of the uncoupled photon Hamiltonian
             (i.e. the diagonal terms of the photon Hamiltonian).
         bilinear_coupling_tensor: The coefficients of the interaction between matter and
@@ -114,8 +116,10 @@ def get_h_qed_gauss_localized_basis(el_eigenvals: List[float],
     for i in range(number_of_localized_functions):
         for j in neighbors:
             if i + j >= 0 and i + j < number_of_localized_functions:
-                h_ph += uncoupled_photon_h_tensor[i, i+j] * \
-                    BosonicOp({f'+_{i} -_{i+j}': 1}, num_modes=number_of_localized_functions)
+                h_ph += BosonicOp({
+                    f'+_{i} -_{i+j}': uncoupled_photon_h_tensor[i, i+j],
+                    "": uncoupled_photon_h_tensor[i, i+j] * overlap_tensor[i, i+j] / 2
+                    }, num_modes=number_of_localized_functions)
     # Finally, generate the interaction Hamiltonian
     max_coupling: np.float64 = np.max(np.abs(bilinear_coupling_tensor))
     h_int = MixedOp({})

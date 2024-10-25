@@ -139,7 +139,8 @@ lm_couplings: List[np.float64] = \
 # Define data for the gaussians
 x_data = np.arange(-cavity_length/2, cavity_length/2, 0.1)
 sigma = cavity_length / (4*number_of_gaussians)
-mu = list(np.linspace(-cavity_length/2 + 2.5*sigma, cavity_length/2 - 2.5*sigma, number_of_gaussians))
+mu = list(
+    np.linspace(-cavity_length/2 + 2.5*sigma, cavity_length/2 - 2.5*sigma, number_of_gaussians))
 
 # Print the parameters
 utils.message_output("Parameters:\n", "output")
@@ -176,19 +177,25 @@ for i in range(number_of_modes):
         # Fit the plane wave to the Gaussian
         projections[i, j] = np.dot(plane_w, gauss)
 
-# Define the combined coefficients that will appear in the Hamiltonian. For instance, the element (i, j) will be
+# Define the combined coefficients that will appear in the Hamiltonian. E.g. the element (i, j) is
 # the sum of all the coeffience of the operators b^dagger_i b_j that appear in the Hamiltonian.
 # This corresponds to: gaussian_coeffs[i, j] = sum_{k=0}^{n_plane_waves} coeffs[k, i] * coeffs[k, j]
+overlap_tensor = np.zeros((number_of_gaussians, number_of_gaussians))
 uncoupled_photon_h_tensor = np.zeros((number_of_gaussians, number_of_gaussians))
 bilinear_coupling_tensor = np.zeros((number_of_gaussians))
 for i in range(number_of_gaussians):
     bilinear_coupling_tensor[i] = np.sum(lm_couplings * projections[:, i])
+    gauss_i = gaussian(x_data, mu[i], sigma, normalized=True)
     for j in range(number_of_gaussians):
-        uncoupled_photon_h_tensor[i, j] = np.sum(modes_energies * projections[:, i] * projections[:, j])
+        uncoupled_photon_h_tensor[i, j] =\
+                np.sum(modes_energies * projections[:, i] * projections[:, j])
+        gauss_j = gaussian(x_data, mu[j], sigma, normalized=True)
+        overlap_tensor[i, j] = np.dot(gauss_i, gauss_j)
 
-h_el, h_ph, h_int, h_qed = utils.get_h_qed_gauss(
+h_el, h_ph, h_int, h_qed = utils.get_h_qed_gauss_localized_basis(
     electron_eigenvalues,
     number_of_gaussians,
+    overlap_tensor,
     uncoupled_photon_h_tensor,
     bilinear_coupling_tensor,
     interaction_type,
@@ -214,8 +221,9 @@ if "particle_number" in observables_requested:
         for i in range(number_of_gaussians):
             for j in neighbors:
                 if i + j >= 0 and i + j < number_of_gaussians:
-                    ph_num += BosonicOp({f'+_{i} -_{i+j}': np.conj(projections[n, i]) * projections[n, i+j]},
-                                        num_modes=number_of_gaussians)
+                    ph_num += BosonicOp({
+                        f'+_{i} -_{i+j}': np.conj(projections[n, i]) * projections[n, i+j]
+                        }, num_modes=number_of_gaussians)
         observables.append(MixedOp({("B"): [(1.0, ph_num)]}))
 # 3. DEFINE THE MAPPERS
 mixed_papper = utils.get_mapper(number_of_gaussians, number_of_fock_states)

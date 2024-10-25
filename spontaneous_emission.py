@@ -112,7 +112,7 @@ utils.message_output("\n", "output")
 
 # NOW, COMPUTE USING THE UTILS
 # 1. GET QED HAMILTONIAN
-h_el, h_ph, h_int, h_qed = utils.get_h_qed(electron_eigenvalues, photon_energies, lm_couplings)
+h_el, h_ph, h_int, h_qed = utils.get_h_qed_plane_waves(electron_eigenvalues, photon_energies, lm_couplings)
 # 2. DEFINE THE OPERATORS to be measured
 observables: List[MixedOp] = []
 if "energy" in observables_requested:
