@@ -228,7 +228,7 @@ def remove_idle_wires(qc: QuantumCircuit) -> QuantumCircuit:
             qc_out.qubits.remove(qubit)
     return qc_out
 
-def optimize_obervables(observables: List[SparsePauliOp],
+def optimize_observables(observables: List[SparsePauliOp],
                         circuit: QuantumCircuit) -> List[SparsePauliOp]:
     """
     This method optimizes the observables to match the new qubit layout.
@@ -340,7 +340,7 @@ def transpile_combine_strategy(single_step_evolution_circuit: QuantumCircuit,
     optimized_circuit: QuantumCircuit = prepare_circuit(optimized_circuit, optimized_init_state)
     # 4. Optimize the observables to match the new qubit layout
     optimized_observables: List[SparsePauliOp] = \
-            optimize_obervables(observables, single_step_evolution_circuit_optimized)
+            optimize_observables(observables, single_step_evolution_circuit_optimized)
     # 5. Get the observables at time 0
     observables_result = [
         estimate_observables(
@@ -408,7 +408,7 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
 
         # Optimize the observables
         optimized_observables: List[SparsePauliOp] = \
-            optimize_obervables(observables, optimized_circuit)
+            optimize_observables(observables, optimized_circuit)
 
         # Remove unused qubits from circuit description
         optimized_circuit = remove_idle_wires(optimized_circuit)
@@ -458,7 +458,7 @@ def transpile_combine_transpile_strategy(
     base_circuit: QuantumCircuit = prepare_circuit(base_circuit, t_0_optimized_init_state)
     # 4. Optimize the observables to match the new qubit layout
     t_0_optimized_observables: List[SparsePauliOp] = \
-        optimize_obervables(observables, single_step_evolution_circuit_optimized)
+        optimize_observables(observables, single_step_evolution_circuit_optimized)
     # 5. Get the observables at time 0
     observables_result = [
         estimate_observables(
@@ -486,7 +486,7 @@ def transpile_combine_transpile_strategy(
             message_output(f"{op}: {operations[op]}\n", "output")
         # Optimize the observables
         optimized_observables: List[SparsePauliOp] = \
-            optimize_obervables(t_0_optimized_observables, optimized_circuit)
+            optimize_observables(t_0_optimized_observables, optimized_circuit)
         # Get the observables at time t
         observables_result.append(
             estimate_observables(estimator, optimized_circuit, optimized_observables, None, 1e-12)
