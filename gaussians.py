@@ -18,10 +18,11 @@ C = 137.03599 # Speed of light in atomic units
 # Define the parameters
 # 1D H atom with soft coulomb (https://journals.aps.org/pra/abstract/10.1103/PhysRevA.99.063819)
 electron_eigenvalues: List[float] = [-0.6738, -0.2798]
-photon_energies = []
+modes_energies = []
 number_of_modes: int | None = None
 number_of_gaussians: int | None = None
-gaussian_interaction_type: Literal['nn', '2nn', '3nn'] = 'nn' # Nearest neighbor, 2nd nearest neighbor, 3rd nearest neighbor
+# Nearest neighbor, 2nd nearest neighbor, 3rd nearest neighbor
+interaction_type: Literal['nn', '2nn', '3nn'] = 'nn'
 bilinear_threshold: float = 0.1 # 10% of the bilinear element
 cavity_length: float = 1.0
 number_of_fock_states: int = 1
@@ -37,16 +38,11 @@ time_evolution_synthesis: str = "lie_trotter"
 # Observables
 observables_requested: List[str] = ["energy", "particle_number", "ph_correlation"]
 
-def visualize_matrix(M, type_to_plot='abs', diag=True, log=False):
+def visualize_matrix(M, type_to_plot: Literal["abs", "real"]='abs', log=False):
     if type_to_plot == 'abs':
         M_p = np.abs(M)
-    elif type_to_plot == 'real':
+    else:
         M_p = np.real(M)
-    elif type_to_plot == 'imag':
-        M_p = np.real(M)
-
-    if diag is False:
-        M_p -= np.diag(np.diag(M_p))
 
     fig = plt.figure(1)
     ax1 = fig.gca()
@@ -57,6 +53,21 @@ def visualize_matrix(M, type_to_plot='abs', diag=True, log=False):
     cbar = fig.colorbar(cp, ax=ax1)
     cbar.set_label('M.'+type_to_plot, rotation=270, labelpad=17)
     plt.show()
+
+# Define the Gaussian function
+def gaussian(x, x0, sigma0, normalized=True):
+    """Single Gaussian function."""
+    g = np.exp(-((x - x0) ** 2) / (2 * sigma0 ** 2))
+    return g / np.linalg.norm(g) if normalized else g
+
+# Define the cavity mode to approximate (e.g., standing wave: cos(kx) or sin(kx))
+def plane_wave(x, k, normalized=True):
+    """Plane wave function (standing wave in a cavity)."""
+    if k % 2 == 0:
+        pn = modes_energies[k] * np.cos(((k + 1) * np.pi) / cavity_length * x)
+    else:
+        pn = modes_energies[k] * np.sin(((k + 1) * np.pi) / cavity_length * x)
+    return pn / np.linalg.norm(pn) if normalized else pn
 
 if not os.path.exists("results"):
     os.makedirs("results")
@@ -75,10 +86,10 @@ with open('input', 'r', encoding="UTF-8") as f:
             electron_eigenvalues: List[float] = []
             for electron_eigenvalue in value[1].split(';'):
                 electron_eigenvalues.append(float(electron_eigenvalue.replace(' ', '')))
-        elif value[0].replace(' ', '') == "photon_energies":
-            photon_energies: List[float] = []
-            for photon_energy in value[1].split(';'):
-                photon_energies.append(float(photon_energy.replace(' ', '')))
+        elif value[0].replace(' ', '') == "modes_energies":
+            modes_energies: List[float] = []
+            for mode_energy in value[1].split(';'):
+                modes_energies.append(float(mode_energy.replace(' ', '')))
         elif value[0].replace(' ', '') == "cavity_length":
             cavity_length = float(value[1].replace(' ', ''))
         elif value[0].replace(' ', '') == "number_of_fock_states":
@@ -117,37 +128,25 @@ with open('input', 'r', encoding="UTF-8") as f:
 # omega_a = pi * c * a /L
 if number_of_gaussians is None:
     raise ValueError("number_of_gaussians must be provided")
-if len(photon_energies) == 0 and number_of_modes is None:
-    raise ValueError("If photon_energies is not provided, number_of_modes must be provided")
-if len(photon_energies) == 0:
-    photon_energies = [np.pi * C * (alpha + 1) / cavity_length for alpha in range(number_of_modes)]
-number_of_modes: int = len(photon_energies)
+if len(modes_energies) == 0 and number_of_modes is None:
+    raise ValueError("If modes_energies is not provided, number_of_modes must be provided")
+if len(modes_energies) == 0:
+    modes_energies = [np.pi * C * (alpha + 1) / cavity_length for alpha in range(number_of_modes)]
+number_of_modes: int = len(modes_energies)
 lm_couplings: List[np.float64] = \
     [40*np.sqrt(omega / cavity_length) * np.sin((2*alpha + 1) * np.pi / 2) if alpha % 2 == 0 else 0
-        for alpha, omega in enumerate(photon_energies)]
+        for alpha, omega in enumerate(modes_energies)]
 # Define data for the gaussians
 x_data = np.arange(-cavity_length/2, cavity_length/2, 0.1)
 sigma = cavity_length / (4*number_of_gaussians)
 mu = list(np.linspace(-cavity_length/2 + 2.5*sigma, cavity_length/2 - 2.5*sigma, number_of_gaussians))
-
-# Define the Gaussian function
-def gaussian(x, x0, sigma0):
-    """Single Gaussian function."""
-    return np.exp(-((x - x0) ** 2) / (2 * sigma0 ** 2))
-
-# Define the cavity mode to approximate (e.g., standing wave: cos(kx) or sin(kx))
-def plane_wave(x, k):
-    """Plane wave function (standing wave in a cavity)."""
-    if k % 2 == 0:
-        return photon_energies[k] * np.cos(((k + 1) * np.pi) / cavity_length * x)
-    return photon_energies[k] * np.sin(((k + 1) * np.pi) / cavity_length * x)
 
 # Print the parameters
 utils.message_output("Parameters:\n", "output")
 utils.message_output(f"Electron eigenvalues: {electron_eigenvalues}\n", "output")
 for i in range(number_of_modes):
     utils.message_output(
-        f"Photon mode {i + 1}: Energy: {photon_energies[i]} H.a.; LM coupling: {lm_couplings[i]}\n",
+        f"Photon mode {i + 1}: Energy: {modes_energies[i]} H.a.; LM coupling: {lm_couplings[i]}\n",
         "output")
 utils.message_output("\n", "output")
 
@@ -169,28 +168,31 @@ if False:
     plt.show()
 
 # Define the overlap integrals bvetween a plane wave and a Gaussian
-coeffs = np.zeros((number_of_modes, number_of_gaussians))
+projections = np.zeros((number_of_modes, number_of_gaussians))
 for i in range(number_of_modes):
-    plane_w = plane_wave(x_data, i)
-    normalized_pn = plane_w / np.linalg.norm(plane_w)
+    plane_w = plane_wave(x_data, i, normalized=True)
     for j in range(number_of_gaussians):
-        gauss = gaussian(x_data, mu[j], sigma)
-        normalized_gauss = gauss / np.linalg.norm(gauss)
+        gauss = gaussian(x_data, mu[j], sigma, normalized=True)
         # Fit the plane wave to the Gaussian
-        coeffs[i, j] = np.dot(normalized_pn, normalized_gauss)
+        projections[i, j] = np.dot(plane_w, gauss)
 
 # Define the combined coefficients that will appear in the Hamiltonian. For instance, the element (i, j) will be
 # the sum of all the coeffience of the operators b^dagger_i b_j that appear in the Hamiltonian.
 # This corresponds to: gaussian_coeffs[i, j] = sum_{k=0}^{n_plane_waves} coeffs[k, i] * coeffs[k, j]
-gaussian_diag_coeffs = np.zeros((number_of_gaussians, number_of_gaussians))
-gaussian_bilinear_coeffs = np.zeros((number_of_gaussians))
+uncoupled_photon_h_tensor = np.zeros((number_of_gaussians, number_of_gaussians))
+bilinear_coupling_tensor = np.zeros((number_of_gaussians))
 for i in range(number_of_gaussians):
-    gaussian_bilinear_coeffs[i] = np.sum(lm_couplings * coeffs[:, i])
+    bilinear_coupling_tensor[i] = np.sum(lm_couplings * projections[:, i])
     for j in range(number_of_gaussians):
-        gaussian_diag_coeffs[i, j] = np.sum(photon_energies * coeffs[:, i] * coeffs[:, j])
+        uncoupled_photon_h_tensor[i, j] = np.sum(modes_energies * projections[:, i] * projections[:, j])
 
 h_el, h_ph, h_int, h_qed = utils.get_h_qed_gauss(
-    electron_eigenvalues, number_of_gaussians, gaussian_diag_coeffs, gaussian_bilinear_coeffs, gaussian_interaction_type, bilinear_threshold)
+    electron_eigenvalues,
+    number_of_gaussians,
+    uncoupled_photon_h_tensor,
+    bilinear_coupling_tensor,
+    interaction_type,
+    bilinear_threshold)
 utils.message_output(str(h_qed), "output")
 # 2. DEFINE THE OPERATORS to be measured
 observables: List[MixedOp] = []
@@ -203,8 +205,8 @@ if "particle_number" in observables_requested:
     observables.append(MixedOp({("F"): [
         # Electron number in mode 1
         (1.0, FermionicOp({"+_1 -_1": 1}, num_spin_orbitals=len(electron_eigenvalues)))]}))
-    neighbors = range(-1, 2) if gaussian_interaction_type == 'nn' else \
-        range(-2, 3) if gaussian_interaction_type == '2nn' else range(-3, 4)
+    neighbors = range(-1, 2) if interaction_type == 'nn' else \
+        range(-2, 3) if interaction_type == '2nn' else range(-3, 4)
     # Expand the particle operator for each plane wave in the new basis
     for n in range(number_of_modes):
         # Photon number in mode i
@@ -212,23 +214,9 @@ if "particle_number" in observables_requested:
         for i in range(number_of_gaussians):
             for j in neighbors:
                 if i + j >= 0 and i + j < number_of_gaussians:
-                    ph_num += BosonicOp({f'+_{i} -_{i+j}': np.conj(coeffs[n, i]) * coeffs[n, i+j]},
+                    ph_num += BosonicOp({f'+_{i} -_{i+j}': np.conj(projections[n, i]) * projections[n, i+j]},
                                         num_modes=number_of_gaussians)
         observables.append(MixedOp({("B"): [(1.0, ph_num)]}))
-if "ph_correlation" in observables_requested:
-    # Photon correlation between modes i and j
-    # https://www.pnas.org/doi/full/10.1073/pnas.1615509114#sec-5, E field operator
-    for i in range(number_of_modes):
-        for j in range(i, number_of_modes):
-            # First, we define the operators
-            op1 = BosonicOp({f"+_{i} +_{j}": 1}, num_modes=number_of_modes)
-            op2 = BosonicOp({f"+_{i} -_{j}": 1}, num_modes=number_of_modes)
-            op3 = BosonicOp({f"-_{i} +_{j}": 1}, num_modes=number_of_modes)
-            op4 = BosonicOp({f"-_{i} -_{j}": 1}, num_modes=number_of_modes)
-            prefactor = 0.5 * np.sqrt(1 / (photon_energies[i] * photon_energies[j]))
-            # Then, we put them all together
-            observables.append(MixedOp(
-                {("B"): [(prefactor, op1), (prefactor, op2), (prefactor, op3), (prefactor, op4)]}))
 # 3. DEFINE THE MAPPERS
 mixed_papper = utils.get_mapper(number_of_gaussians, number_of_fock_states)
 # 4. MAP THE HAMILTONIAN AND OBSERVABLES

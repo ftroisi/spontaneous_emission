@@ -30,7 +30,7 @@ def message_output(message: str, filename: str | None = None) -> None:
             output.write(message)
             output.close()
 
-def get_h_qed(el_eigenvals: List[float],
+def get_h_qed_plane_waves(el_eigenvals: List[float],
               ph_energies: List[float],
               lm_couplings: List[float]) -> tuple[FermionicOp, BosonicOp, MixedOp, MixedOp]:
     """"
@@ -79,24 +79,25 @@ def get_h_qed(el_eigenvals: List[float],
     ) + h_int
     return h_el, h_ph, h_int, h_qed
 
-def get_h_qed_gauss(el_eigenvals: List[float],
-                    number_of_gaussians: int,
-                    gaussian_diag_coeffs: npt.NDArray,
-                    gaussian_bilinear_coeffs: npt.NDArray,
-                    gaussian_interaction_type: Literal['nn', '2nn', '3nn'],
-                    bilinear_threshold: np.float64) -> tuple[FermionicOp, BosonicOp, MixedOp, MixedOp]:
+def get_h_qed_gauss_localized_basis(el_eigenvals: List[float],
+                                    number_of_localized_functions: int,
+                                    uncoupled_photon_h_tensor: npt.NDArray,
+                                    bilinear_coupling_tensor: npt.NDArray,
+                                    interaction_type: Literal['nn', '2nn', '3nn'],
+                                    bilinear_threshold: np.float64
+                                    ) -> tuple[FermionicOp, BosonicOp, MixedOp, MixedOp]:
     """"
     This method generates the QED Hamiltonian for a given set of electron eigenvalues,
     photon energies and light-matter couplings.
 
     Args:
         el_eigenvals: The electron eigenvalues (in Hartree).
-        number_of_gaussians: The number of localized Gaussians used to represent the photon modes.
-        gaussian_diag_coeffs: The coefficients of the Gaussian Gaussian interaction
+        number_of_localized_functions: Number of localized functions used to represent the modes.
+        uncoupled_photon_h_tensor: The coefficients of the uncoupled photon Hamiltonian
             (i.e. the diagonal terms of the photon Hamiltonian).
-        gaussian_bilinear_coeffs: The coefficients of the Gaussian-matter interaction
-            (i.e. the bilinear terms of the photon Hamiltonian).
-        gaussian_interaction_type: The type of Gaussian interaction to be used
+        bilinear_coupling_tensor: The coefficients of the interaction between matter and
+            the localized functions (i.e. the bilinear terms of the photon Hamiltonian).
+        interaction_type: The type of interaction between localized functions to be used
             (Nearest neighbor, 2nd nearest neighbor, 3rd nearest neighbor)
         bilinear_threshold: The threshold to consider a bilinear term in the interaction.
     """
@@ -107,16 +108,16 @@ def get_h_qed_gauss(el_eigenvals: List[float],
     for i, eigenval in enumerate(el_eigenvals):
         h_el += FermionicOp({f'+_{i} -_{i}': eigenval}, num_spin_orbitals=len(el_eigenvals))
     # Next, generate the uncoupled photon Hamiltonian
-    neighbors = range(-1, 2) if gaussian_interaction_type == 'nn' else \
-        range(-2, 3) if gaussian_interaction_type == '2nn' else range(-3, 4)
+    neighbors = range(-1, 2) if interaction_type == 'nn' else \
+        range(-2, 3) if interaction_type == '2nn' else range(-3, 4)
     h_ph = BosonicOp({})
-    for i in range(number_of_gaussians):
+    for i in range(number_of_localized_functions):
         for j in neighbors:
-            if i + j >= 0 and i + j < number_of_gaussians:
-                h_ph += gaussian_diag_coeffs[i, i+j] * \
-                    BosonicOp({f'+_{i} -_{i+j}': 1}, num_modes=number_of_gaussians)
+            if i + j >= 0 and i + j < number_of_localized_functions:
+                h_ph += uncoupled_photon_h_tensor[i, i+j] * \
+                    BosonicOp({f'+_{i} -_{i+j}': 1}, num_modes=number_of_localized_functions)
     # Finally, generate the interaction Hamiltonian
-    max_coupling: np.float64 = np.max(np.abs(gaussian_bilinear_coeffs))
+    max_coupling: np.float64 = np.max(np.abs(bilinear_coupling_tensor))
     h_int = MixedOp({})
     for i, eigenval in enumerate(el_eigenvals):
         for j, eigenval in enumerate(el_eigenvals):
@@ -126,10 +127,14 @@ def get_h_qed_gauss(el_eigenvals: List[float],
             emission_op = FermionicOp({f'+_{j} -_{i}': 1}, num_spin_orbitals=len(el_eigenvals))
             ph_creation = BosonicOp({})
             ph_annihilation = BosonicOp({})
-            for k in range(number_of_gaussians):
-                if np.abs(gaussian_bilinear_coeffs[k]) > np.abs(bilinear_threshold * max_coupling):
-                    ph_creation += BosonicOp({f'+_{k}': gaussian_bilinear_coeffs[k]}, num_modes=number_of_gaussians)
-                    ph_annihilation += BosonicOp({f'-_{k}': gaussian_bilinear_coeffs[k]}, num_modes=number_of_gaussians)
+            for k in range(number_of_localized_functions):
+                if np.abs(bilinear_coupling_tensor[k]) > np.abs(bilinear_threshold * max_coupling):
+                    ph_creation += BosonicOp(
+                        {f'+_{k}': bilinear_coupling_tensor[k]},
+                        num_modes=number_of_localized_functions)
+                    ph_annihilation += BosonicOp(
+                        {f'-_{k}': bilinear_coupling_tensor[k]},
+                        num_modes=number_of_localized_functions)
             # Build the interaction
             h_int += MixedOp({
                 ("F", "B"): [(1., absorption_op, ph_annihilation), (1., emission_op, ph_creation)],
