@@ -185,8 +185,9 @@ else:
                 f.close()
             # Then, get the available backends
             provider = MQPProvider(token=token)
-            # Finally, pick the select the backend
-            backend = provider.backend(hardware)
+            # Finally, pick the selected backend
+            backend = provider.get_backend(hardware)
+            backend.coupling_map.make_symmetric()
     except ValueError as e:
         backend = GenericBackendV2(num_qubits=hqed_mapped.num_qubits)
         utils.message_output(f"Error: {e}. Using generic BE instead\n", "output")

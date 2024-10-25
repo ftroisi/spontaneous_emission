@@ -1,7 +1,8 @@
 from typing import List, Literal
 import numpy as np
 import numpy.typing as npt
-from qiskit import (QuantumCircuit, transpile)
+from qiskit.compiler import transpile
+from qiskit.circuit import QuantumCircuit
 from qiskit.circuit.library import PauliEvolutionGate
 from qiskit.circuit.quantumregister import Qubit
 from qiskit.primitives import Estimator, BackendEstimator
@@ -291,7 +292,7 @@ def remove_idle_wires(qc: QuantumCircuit) -> QuantumCircuit:
             qc_out.qubits.remove(qubit)
     return qc_out
 
-def optimize_obervables(observables: List[SparsePauliOp],
+def optimize_observables(observables: List[SparsePauliOp],
                         circuit: QuantumCircuit) -> List[SparsePauliOp]:
     """
     This method optimizes the observables to match the new qubit layout.
@@ -403,7 +404,7 @@ def transpile_combine_strategy(single_step_evolution_circuit: QuantumCircuit,
     optimized_circuit: QuantumCircuit = prepare_circuit(optimized_circuit, optimized_init_state)
     # 4. Optimize the observables to match the new qubit layout
     optimized_observables: List[SparsePauliOp] = \
-            optimize_obervables(observables, single_step_evolution_circuit_optimized)
+            optimize_observables(observables, single_step_evolution_circuit_optimized)
     # 5. Get the observables at time 0
     observables_result = [
         estimate_observables(
@@ -462,7 +463,7 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
     evolved_state: QuantumCircuit = prepare_circuit(evolved_state, initial_state)
     # 2. Get the t = 0 observables
     observables_result = [
-        estimate_observables(estimator, evolved_state, observables, None, 1e-12)
+        #optimize_observables(estimator, evolved_state, observables, None, 1e-12)
     ]
     # 3. Time evolution
     curr_time: List[float] = [0.0]
@@ -475,12 +476,15 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
             evolved_state.decompose(reps=2)\
                 .draw(output="mpl", filename=f"results/circuits/circuit_raw_t_{t:.4f}.png")
         # Then, transpile the combined circuit
+        reduced_coupling_map = [list(edge) for edge in backend.coupling_map if set(edge).issubset(set([x for x in range(20)]))]
         optimized_circuit: QuantumCircuit = \
-            transpile(evolved_state, backend, optimization_level=optimization_level)
+            transpile(evolved_state, backend, optimization_level=optimization_level, coupling_map=reduced_coupling_map, basis_gates=["cx", "r"])
+        print(optimized_circuit.num_qubits)
+        print(optimized_circuit.qubits)
 
         # Optimize the observables
         optimized_observables: List[SparsePauliOp] = \
-            optimize_obervables(observables, optimized_circuit)
+            optimize_observables(observables, optimized_circuit)
 
         # Remove unused qubits from circuit description
         optimized_circuit = remove_idle_wires(optimized_circuit)
@@ -488,7 +492,7 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
             remove_idle_qubit_from_obervables(optimized_observables, optimized_circuit)
 
         # Save circuit (only for the first two steps because after that it gets too long)
-        if idx < 2 and optimized_circuit.num_qubits <= 4:
+        if idx < 2 and optimized_circuit.num_qubits <= 8:
             optimized_circuit.draw(output="mpl", filename=f"results/circuits/circuit_t_{t:.4f}.png")
         message_output(
         f"Circuit optimized with level: {optimization_level}. Operation count:\n", "output")
@@ -533,7 +537,7 @@ def transpile_combine_transpile_strategy(
     base_circuit: QuantumCircuit = prepare_circuit(base_circuit, t_0_optimized_init_state)
     # 4. Optimize the observables to match the new qubit layout
     t_0_optimized_observables: List[SparsePauliOp] = \
-        optimize_obervables(observables, single_step_evolution_circuit_optimized)
+        optimize_observables(observables, single_step_evolution_circuit_optimized)
     # 5. Get the observables at time 0
     observables_result = [
         estimate_observables(
@@ -562,7 +566,7 @@ def transpile_combine_transpile_strategy(
             message_output(f"{op}: {operations[op]}\n", "output")
         # Optimize the observables
         optimized_observables: List[SparsePauliOp] = \
-            optimize_obervables(t_0_optimized_observables, optimized_circuit)
+            optimize_observables(t_0_optimized_observables, optimized_circuit)
         # Get the observables at time t
         observables_result.append(
             estimate_observables(estimator, optimized_circuit, optimized_observables, None, 1e-12)
