@@ -12,6 +12,7 @@ from qiskit.primitives import Estimator
 
 sys.path.append('./')
 import spontaneous_emission_utils as utils
+import io_tools as io
 
 C = 137.03599 # Speed of light in atomic units
 
@@ -143,13 +144,13 @@ mu = list(
     np.linspace(-cavity_length/2 + 2.5*sigma, cavity_length/2 - 2.5*sigma, number_of_gaussians))
 
 # Print the parameters
-utils.message_output("Parameters:\n", "output")
-utils.message_output(f"Electron eigenvalues: {electron_eigenvalues}\n", "output")
+io.message_output("Parameters:\n", "output")
+io.message_output(f"Electron eigenvalues: {electron_eigenvalues}\n", "output")
 for i in range(number_of_modes):
-    utils.message_output(
+    io.message_output(
         f"Photon mode {i + 1}: Energy: {modes_energies[i]} H.a.; LM coupling: {lm_couplings[i]}\n",
         "output")
-utils.message_output("\n", "output")
+io.message_output("\n", "output")
 
 # Plot the Gaussians
 if False:
@@ -192,7 +193,7 @@ for i in range(number_of_gaussians):
         gauss_j = gaussian(x_data, mu[j], sigma, normalized=True)
         overlap_tensor[i, j] = np.dot(gauss_i, gauss_j)
 
-h_el, h_ph, h_int, h_qed = utils.get_h_qed_gauss_localized_basis(
+h_el, h_ph, h_int, h_qed = utils.get_h_qed_localized_basis(
     electron_eigenvalues,
     number_of_gaussians,
     overlap_tensor,
@@ -200,7 +201,7 @@ h_el, h_ph, h_int, h_qed = utils.get_h_qed_gauss_localized_basis(
     bilinear_coupling_tensor,
     interaction_type,
     bilinear_threshold)
-utils.message_output(str(h_qed), "output")
+io.message_output(str(h_qed), "output")
 # 2. DEFINE THE OPERATORS to be measured
 observables: List[MixedOp] = []
 if "energy" in observables_requested:
@@ -252,12 +253,12 @@ else:
         service.backends(simulator=False)
         # Finally, pick the select the backend
         backend = service.backend(hardware)
-        utils.message_output(f"Backend: {hardware}. Num qubits = {backend.num_qubits}\n", "output")
+        io.message_output(f"Backend: {hardware}. Num qubits = {backend.num_qubits}\n", "output")
     except ValueError as e:
         backend = GenericBackendV2(num_qubits=hqed_mapped.num_qubits)
-        utils.message_output(f"Error: {e}. Using generic BE instead\n", "output")
+        io.message_output(f"Error: {e}. Using generic BE instead\n", "output")
 # 7. Time evolve
-utils.message_output(
+io.message_output(
     f"Starting time evolution with delta_t = {delta_t} and final_time = {final_time}\n", "output")
 start_time = time.time()
 estimator = Estimator()
@@ -265,4 +266,4 @@ estimator.set_options(shots=None)
 result: utils.TimeEvolutionResult = utils.custom_time_evolve(
     hqed_mapped, observables_mapped, init_state, time_evolution_strategy,
     time_evolution_synthesis, optimization_level, backend, estimator, final_time, delta_t)
-utils.message_output(f"Time elapsed: {time.time() - start_time}s", "output")
+io.message_output(f"Time elapsed: {time.time() - start_time}s", "output")

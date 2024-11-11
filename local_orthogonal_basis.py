@@ -12,6 +12,7 @@ from qiskit.primitives import Estimator
 
 sys.path.append('./')
 import spontaneous_emission_utils as utils
+import io_tools as io
 
 C = 137.03599 # Speed of light in atomic units
 
@@ -38,21 +39,14 @@ time_evolution_synthesis: str = "lie_trotter"
 # Observables
 observables_requested: List[str] = ["energy", "particle_number", "ph_correlation"]
 
-def visualize_matrix(M, type_to_plot: Literal["abs", "real"]='abs', log=False):
-    if type_to_plot == 'abs':
-        M_p = np.abs(M)
-    else:
-        M_p = np.real(M)
-
-    fig = plt.figure(1)
-    ax1 = fig.gca()
-    if log:
-        cp = ax1.matshow(np.log(M_p), interpolation='none')  # cmap='Reds')
-    else:
-        cp = ax1.matshow(M_p, interpolation='none', cmap='Reds')
-    cbar = fig.colorbar(cp, ax=ax1)
-    cbar.set_label('M.'+type_to_plot, rotation=270, labelpad=17)
-    plt.show()
+# Define the cardinal sine function
+def cardinal_sine_basis(x, x0, normalized=True):
+    """
+    Cardinal sine function:
+    https://math.stackexchange.com/questions/2175638/orthogonality-of-periodic-sinc-function
+    """
+    sinc = np.sinc(np.pi * (x - x0)) * np.exp(1j * 2*np.pi*x)
+    return sinc / np.linalg.norm(sinc) if normalized else sinc
 
 # Define the triangular function
 def triangular_basis(x, x0, m, normalized=True):
@@ -137,28 +131,30 @@ number_of_modes: int = len(modes_energies)
 lm_couplings: List[np.float64] = \
     [40*np.sqrt(omega / cavity_length) * np.sin((2*alpha + 1) * np.pi / 2) if alpha % 2 == 0 else 0
         for alpha, omega in enumerate(modes_energies)]
-# Define data for the gaussians
+# Define data for the the basis functions
 x_data = np.arange(-cavity_length/2, cavity_length/2, 0.1)
 angular_coeff = 2*number_of_basis_functions / cavity_length
 centers = list(np.linspace(
     -cavity_length/2 + 1/angular_coeff,
     cavity_length/2 - 1/angular_coeff,
     number_of_basis_functions))
+#centers = list(np.linspace(int(-cavity_length/2), int(cavity_length/2), number_of_basis_functions))
 
 # Print the parameters
-utils.message_output("Parameters:\n", "output")
-utils.message_output(f"Electron eigenvalues: {electron_eigenvalues}\n", "output")
+io.message_output("Parameters:\n", "output")
+io.message_output(f"Electron eigenvalues: {electron_eigenvalues}\n", "output")
 for i in range(number_of_modes):
-    utils.message_output(
+    io.message_output(
         f"Photon mode {i + 1}: Energy: {modes_energies[i]} H.a.; LM coupling: {lm_couplings[i]}\n",
         "output")
-utils.message_output("\n", "output")
+io.message_output("\n", "output")
 
 # Plot the Basis functions
 if False:
     plt.figure(figsize=(10, 6))
     for i in range(number_of_basis_functions):
-        plt.plot(x_data, triangular_basis(x_data, centers[i], angular_coeff), label=f"Basis Func {i+1}")
+        func = triangular_basis(x_data, centers[i], angular_coeff)
+        plt.plot(x_data, func, label=f"Basis Func {i+1}")
     plt.legend()
     plt.grid(True)
     plt.show()
@@ -191,7 +187,7 @@ for i in range(number_of_basis_functions):
         uncoupled_photon_h_tensor[i, j] = \
             np.sum(modes_energies * projections[:, i] * projections[:, j])
 
-h_el, h_ph, h_int, h_qed = utils.get_h_qed_gauss_localized_basis(
+h_el, h_ph, h_int, h_qed = utils.get_h_qed_localized_basis(
     electron_eigenvalues,
     number_of_basis_functions,
     overlap_tensor=np.diag(np.ones(number_of_basis_functions)),
@@ -199,7 +195,7 @@ h_el, h_ph, h_int, h_qed = utils.get_h_qed_gauss_localized_basis(
     bilinear_coupling_tensor=bilinear_coupling_tensor,
     interaction_type=interaction_type,
     bilinear_threshold=bilinear_threshold)
-utils.message_output(str(h_qed), "output")
+io.message_output(str(h_qed), "output")
 # 2. DEFINE THE OPERATORS to be measured
 observables: List[MixedOp] = []
 if "energy" in observables_requested:
@@ -266,12 +262,12 @@ else:
         service.backends(simulator=False)
         # Finally, pick the select the backend
         backend = service.backend(hardware)
-        utils.message_output(f"Backend: {hardware}. Num qubits = {backend.num_qubits}\n", "output")
+        io.message_output(f"Backend: {hardware}. Num qubits = {backend.num_qubits}\n", "output")
     except ValueError as e:
         backend = GenericBackendV2(num_qubits=hqed_mapped.num_qubits)
-        utils.message_output(f"Error: {e}. Using generic BE instead\n", "output")
+        io.message_output(f"Error: {e}. Using generic BE instead\n", "output")
 # 7. Time evolve
-utils.message_output(
+io.message_output(
     f"Starting time evolution with delta_t = {delta_t} and final_time = {final_time}\n", "output")
 start_time = time.time()
 estimator = Estimator()
@@ -279,4 +275,4 @@ estimator.set_options(shots=None)
 result: utils.TimeEvolutionResult = utils.custom_time_evolve(
     hqed_mapped, observables_mapped, init_state, time_evolution_strategy,
     time_evolution_synthesis, optimization_level, backend, estimator, final_time, delta_t)
-utils.message_output(f"Time elapsed: {time.time() - start_time}s", "output")
+io.message_output(f"Time elapsed: {time.time() - start_time}s", "output")

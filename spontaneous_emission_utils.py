@@ -17,18 +17,8 @@ from qiskit_nature.second_q.mappers import (BosonicLogarithmicMapper,
                                             BravyiKitaevMapper, MixedMapper)
 from qiskit_nature.second_q.operators import BosonicOp, FermionicOp, MixedOp
 
+import io_tools as io
 np.set_printoptions(precision=6, suppress=True)
-
-# Messages
-def message_output(message: str, filename: str | None = None) -> None:
-    "Allows to print messages to file at run-time"
-    # First, print to console
-    print(message, end="")
-    # Then print to file
-    if filename is not None:
-        with open(filename, 'a+', encoding="UTF-8") as output:
-            output.write(message)
-            output.close()
 
 def get_h_qed_plane_waves(el_eigenvals: List[float],
               ph_energies: List[float],
@@ -79,14 +69,15 @@ def get_h_qed_plane_waves(el_eigenvals: List[float],
     ) + h_int
     return h_el, h_ph, h_int, h_qed
 
-def get_h_qed_gauss_localized_basis(el_eigenvals: List[float],
-                                    number_of_localized_functions: int,
-                                    overlap_tensor: npt.NDArray,
-                                    uncoupled_photon_h_tensor: npt.NDArray,
-                                    bilinear_coupling_tensor: npt.NDArray,
-                                    interaction_type: Literal['nn', '2nn', '3nn'],
-                                    bilinear_threshold: np.float64
-                                    ) -> tuple[FermionicOp, BosonicOp, MixedOp, MixedOp]:
+def get_h_qed_localized_basis(
+        el_eigenvals: List[float],
+        number_of_localized_functions: int,
+        overlap_tensor: npt.NDArray,
+        uncoupled_photon_h_tensor: npt.NDArray,
+        bilinear_coupling_tensor: npt.NDArray,
+        interaction_type: Literal['nn', '2nn', '3nn'],
+        bilinear_threshold: np.float64
+    ) -> tuple[FermionicOp, BosonicOp, MixedOp, MixedOp]:
     """"
     This method generates the QED Hamiltonian for a given set of electron eigenvalues,
     photon energies and light-matter couplings.
@@ -425,14 +416,14 @@ def transpile_combine_strategy(single_step_evolution_circuit: QuantumCircuit,
     # 6. Time evolution
     curr_time: List[float] = [0.0]
     for idx, t in enumerate(time):
-        message_output(f"Time step {idx + 1}/{len(time)}\n", "output")
+        io.message_output(f"Time step {idx + 1}/{len(time)}\n", "output")
         optimized_circuit.compose(single_step_evolution_circuit_optimized, inplace=True)
         # Print info
-        message_output(
+        io.message_output(
         f"Circuit optimized with level: {optimization_level}. Operation count:\n", "output")
         operations = optimized_circuit.count_ops()
         for op in operations:
-            message_output(f"{op}: {operations[op]}\n", "output")
+            io.message_output(f"{op}: {operations[op]}\n", "output")
         # Save circuit (only for the first two steps because after that it gets too long)
         if idx < 2 and optimized_circuit.num_qubits <= 8:
             optimized_circuit.draw(output="mpl", filename=f"results/circuits/circuit_t_{t:.4f}.png")
@@ -476,7 +467,7 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
     # 3. Time evolution
     curr_time: List[float] = [0.0]
     for idx, t in enumerate(time):
-        message_output(f"Time step {idx + 1}/{len(time)}\n", "output")
+        io.message_output(f"Time step {idx + 1}/{len(time)}\n", "output")
         # First, compose the unoptimized circuit
         evolved_state.compose(single_step_evolution_circuit, inplace=True)
         # Save circuit (only for the first two steps because after that it gets too long)
@@ -499,11 +490,11 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
         # Save circuit (only for the first two steps because after that it gets too long)
         if idx < 2 and optimized_circuit.num_qubits <= 8:
             optimized_circuit.draw(output="mpl", filename=f"results/circuits/circuit_t_{t:.4f}.png")
-        message_output(
+        io.message_output(
         f"Circuit optimized with level: {optimization_level}. Operation count:\n", "output")
         operations = optimized_circuit.count_ops()
         for op in operations:
-            message_output(f"{op}: {operations[op]}\n", "output")
+            io.message_output(f"{op}: {operations[op]}\n", "output")
 
         # Get the observables at time t
         observables_result.append(
@@ -555,7 +546,7 @@ def transpile_combine_transpile_strategy(
     # 6. Time evolution
     curr_time: List[float] = [0.0]
     for idx, t in enumerate(time):
-        message_output(f"Time step {idx + 1}/{len(time)}\n", "output")
+        io.message_output(f"Time step {idx + 1}/{len(time)}\n", "output")
         # 1. Compose the unoptimized circuit
         base_circuit.compose(single_step_evolution_circuit_optimized, inplace=True)
         # 2. Transpile the combined circuit
@@ -564,11 +555,11 @@ def transpile_combine_transpile_strategy(
         # Save circuit (only for the first two steps because after that it gets too long)
         if idx < 2 and optimized_circuit.num_qubits <= 8:
             optimized_circuit.draw(output="mpl", filename=f"results/circuits/circuit_t_{t:.4f}.png")
-        message_output(
+        io.message_output(
         f"Circuit optimized with level: {optimization_level}. Operation count:\n", "output")
         operations = optimized_circuit.count_ops()
         for op in operations:
-            message_output(f"{op}: {operations[op]}\n", "output")
+            io.message_output(f"{op}: {operations[op]}\n", "output")
         # Optimize the observables
         optimized_observables: List[SparsePauliOp] = \
             optimize_observables(t_0_optimized_observables, optimized_circuit)
