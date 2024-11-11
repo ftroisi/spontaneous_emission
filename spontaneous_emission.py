@@ -1,4 +1,3 @@
-import math
 import os
 import sys
 import time
@@ -12,6 +11,7 @@ from qiskit_nature.second_q.operators import BosonicOp, FermionicOp, MixedOp
 
 sys.path.append('./')
 import spontaneous_emission_utils as utils
+import io_tools as io
 
 C = 137.03599 # Speed of light in atomic units
 
@@ -102,13 +102,13 @@ photon_energies = [photon_energies[mode] for mode in valid_modes]
 lm_couplings = [lm_couplings[mode] for mode in valid_modes]
 
 # Print the parameters
-utils.message_output("Parameters:\n", "output")
-utils.message_output(f"Electron eigenvalues: {electron_eigenvalues}\n", "output")
+io.message_output("Parameters:\n", "output")
+io.message_output(f"Electron eigenvalues: {electron_eigenvalues}\n", "output")
 for i in range(number_of_modes):
-    utils.message_output(
+    io.message_output(
         f"Photon mode {2*i+1}: Energy: {photon_energies[i]} H.a.; LM coupling: {lm_couplings[i]}\n",
         "output")
-utils.message_output("\n", "output")
+io.message_output("\n", "output")
 
 # NOW, COMPUTE USING THE UTILS
 # 1. GET QED HAMILTONIAN
@@ -169,12 +169,12 @@ else:
         service.backends(simulator=False)
         # Finally, pick the select the backend
         backend = service.backend(hardware)
-        utils.message_output(f"Backend: {hardware}. Num qubits = {backend.num_qubits}\n", "output")
+        io.message_output(f"Backend: {hardware}. Num qubits = {backend.num_qubits}\n", "output")
     except ValueError as e:
         backend = GenericBackendV2(num_qubits=hqed_mapped.num_qubits)
-        utils.message_output(f"Error: {e}. Using generic BE instead\n", "output")
+        io.message_output(f"Error: {e}. Using generic BE instead\n", "output")
 # 7. Time evolve
-utils.message_output(
+io.message_output(
     f"Starting time evolution with delta_t = {delta_t} and final_time = {final_time}\n", "output")
 start_time = time.time()
 estimator = Estimator()
@@ -182,4 +182,4 @@ estimator.set_options(shots=None)
 result: utils.TimeEvolutionResult = utils.custom_time_evolve(
     hqed_mapped, observables_mapped, init_state, time_evolution_strategy,
     time_evolution_synthesis, optimization_level, backend, estimator, final_time, delta_t)
-utils.message_output(f"Time elapsed: {time.time() - start_time}s", "output")
+io.message_output(f"Time elapsed: {time.time() - start_time}s", "output")
