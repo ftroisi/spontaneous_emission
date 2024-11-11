@@ -89,12 +89,17 @@ with open('input', 'r', encoding="UTF-8") as f:
 if len(photon_energies) == 0 and number_of_modes is None:
     raise ValueError("If photon_energies is not provided, number_of_modes must be provided")
 if len(photon_energies) == 0:
-    photon_energies = [np.pi * C * 1 / cavity_length for alpha in range(1,2*number_of_modes,2)]
-number_of_modes: int = len(photon_energies)
+    photon_energies = [np.pi * C * (alpha + 1) / cavity_length for alpha in range(number_of_modes)]
 # g_a = sqrt(omega_a / L) * sin(a * pi / 2)
 lm_couplings: List[np.float64] = \
-    [20*np.sqrt(omega / cavity_length) * np.sin((2*alpha + 1) * np.pi / 2)
+    [40*np.sqrt(omega / cavity_length) * np.sin((2*alpha + 1) * np.pi / 2) if alpha % 2 == 0 else 0
         for alpha, omega in enumerate(photon_energies)]
+
+# Remove modes with zero coupling
+valid_modes = np.where(np.array(lm_couplings) != 0)[0]
+number_of_modes: int = len(valid_modes)
+photon_energies = [photon_energies[mode] for mode in valid_modes]
+lm_couplings = [lm_couplings[mode] for mode in valid_modes]
 
 # Print the parameters
 utils.message_output("Parameters:\n", "output")
@@ -107,7 +112,7 @@ utils.message_output("\n", "output")
 
 # NOW, COMPUTE USING THE UTILS
 # 1. GET QED HAMILTONIAN
-h_el, h_ph, h_int, h_qed = utils.get_h_qed(electron_eigenvalues, photon_energies, lm_couplings)
+h_el, h_ph, h_int, h_qed = utils.get_h_qed_plane_waves(electron_eigenvalues, photon_energies, lm_couplings)
 # 2. DEFINE THE OPERATORS to be measured
 observables: List[MixedOp] = []
 if "energy" in observables_requested:
@@ -117,7 +122,7 @@ if "energy" in observables_requested:
     observables.append(h_int) # Interaction energy
 if "particle_number" in observables_requested:
     observables.append(MixedOp({("F"): [
-        # Electron number in mode 1
+        # Electron number in excited state
         (1.0, FermionicOp({"+_1 -_1": 1}, num_spin_orbitals=len(electron_eigenvalues)))]}))
     for i in range(number_of_modes):
         # Photon number in mode i
@@ -172,10 +177,9 @@ else:
 utils.message_output(
     f"Starting time evolution with delta_t = {delta_t} and final_time = {final_time}\n", "output")
 start_time = time.time()
+estimator = Estimator()
+estimator.set_options(shots=None)
 result: utils.TimeEvolutionResult = utils.custom_time_evolve(
     hqed_mapped, observables_mapped, init_state, time_evolution_strategy,
-    time_evolution_synthesis, optimization_level, backend, Estimator(), final_time, delta_t)
+    time_evolution_synthesis, optimization_level, backend, estimator, final_time, delta_t)
 utils.message_output(f"Time elapsed: {time.time() - start_time}s", "output")
-# 8. Save results
-observables_result = np.array(np.array(result.observables)[:, :, 0])
-np.savez("results/time_evolution", times=result.times, observables=observables_result)

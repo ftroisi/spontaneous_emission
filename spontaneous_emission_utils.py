@@ -1,5 +1,6 @@
 from typing import List, Literal
 import numpy as np
+import numpy.typing as npt
 from qiskit import (QuantumCircuit, transpile)
 from qiskit.circuit.library import PauliEvolutionGate
 from qiskit.circuit.quantumregister import Qubit
@@ -29,7 +30,7 @@ def message_output(message: str, filename: str | None = None) -> None:
             output.write(message)
             output.close()
 
-def get_h_qed(el_eigenvals: List[float],
+def get_h_qed_plane_waves(el_eigenvals: List[float],
               ph_energies: List[float],
               lm_couplings: List[float]) -> tuple[FermionicOp, BosonicOp, MixedOp, MixedOp]:
     """"
@@ -76,6 +77,77 @@ def get_h_qed(el_eigenvals: List[float],
             ("B",): [(1.0, h_ph)],
         }
     ) + h_int
+    return h_el, h_ph, h_int, h_qed
+
+def get_h_qed_gauss_localized_basis(el_eigenvals: List[float],
+                                    number_of_localized_functions: int,
+                                    overlap_tensor: npt.NDArray,
+                                    uncoupled_photon_h_tensor: npt.NDArray,
+                                    bilinear_coupling_tensor: npt.NDArray,
+                                    interaction_type: Literal['nn', '2nn', '3nn'],
+                                    bilinear_threshold: np.float64
+                                    ) -> tuple[FermionicOp, BosonicOp, MixedOp, MixedOp]:
+    """"
+    This method generates the QED Hamiltonian for a given set of electron eigenvalues,
+    photon energies and light-matter couplings.
+
+    Args:
+        el_eigenvals: The electron eigenvalues (in Hartree).
+        number_of_localized_functions: Number of localized functions used to represent the modes.
+        overlap_tensor: The overlap tensor between the localized functions.
+        uncoupled_photon_h_tensor: The coefficients of the uncoupled photon Hamiltonian
+            (i.e. the diagonal terms of the photon Hamiltonian).
+        bilinear_coupling_tensor: The coefficients of the interaction between matter and
+            the localized functions (i.e. the bilinear terms of the photon Hamiltonian).
+        interaction_type: The type of interaction between localized functions to be used
+            (Nearest neighbor, 2nd nearest neighbor, 3rd nearest neighbor)
+        bilinear_threshold: The threshold to consider a bilinear term in the interaction.
+    """
+    # The QED Hamiltonian is componsed of three terms, the uncoupled electron Hamiltonian,
+    # the uncoupled photon Hamiltonian and the interaction Hamiltonian.
+    # First, generate the uncoupled electron Hamiltonian
+    h_el = FermionicOp({})
+    for i, eigenval in enumerate(el_eigenvals):
+        h_el += FermionicOp({f'+_{i} -_{i}': eigenval}, num_spin_orbitals=len(el_eigenvals))
+    # Next, generate the uncoupled photon Hamiltonian
+    neighbors = range(-1, 2) if interaction_type == 'nn' else \
+        range(-2, 3) if interaction_type == '2nn' else range(-3, 4)
+    h_ph = BosonicOp({})
+    for i in range(number_of_localized_functions):
+        for j in neighbors:
+            if i + j >= 0 and i + j < number_of_localized_functions:
+                h_ph += BosonicOp({
+                    f'+_{i} -_{i+j}': uncoupled_photon_h_tensor[i, i+j],
+                    "": uncoupled_photon_h_tensor[i, i+j] * overlap_tensor[i, i+j] / 2
+                    }, num_modes=number_of_localized_functions)
+    # Finally, generate the interaction Hamiltonian
+    max_coupling: np.float64 = np.max(np.abs(bilinear_coupling_tensor))
+    h_int = MixedOp({})
+    for i, eigenval in enumerate(el_eigenvals):
+        for j, eigenval in enumerate(el_eigenvals):
+            if j >= i:
+                continue
+            absorption_op = FermionicOp({f'+_{i} -_{j}': 1}, num_spin_orbitals=len(el_eigenvals))
+            emission_op = FermionicOp({f'+_{j} -_{i}': 1}, num_spin_orbitals=len(el_eigenvals))
+            ph_creation = BosonicOp({})
+            ph_annihilation = BosonicOp({})
+            for k in range(number_of_localized_functions):
+                if np.abs(bilinear_coupling_tensor[k]) > np.abs(bilinear_threshold * max_coupling):
+                    ph_creation += BosonicOp(
+                        {f'+_{k}': bilinear_coupling_tensor[k]},
+                        num_modes=number_of_localized_functions)
+                    ph_annihilation += BosonicOp(
+                        {f'-_{k}': bilinear_coupling_tensor[k]},
+                        num_modes=number_of_localized_functions)
+            # Build the interaction
+            h_int += MixedOp({
+                ("F", "B"): [(1., absorption_op, ph_annihilation), (1., emission_op, ph_creation)],
+            })
+    # Finally, put it all together
+    h_qed = MixedOp({
+        ("F",): [(1.0, h_el)],
+        ("B",): [(1.0, h_ph)],
+    }) + h_int
     return h_el, h_ph, h_int, h_qed
 
 def get_mapper(number_of_modes: int, number_of_fock_states: int) -> MixedMapper:
@@ -351,6 +423,7 @@ def transpile_combine_strategy(single_step_evolution_circuit: QuantumCircuit,
             1e-12
         )]
     # 6. Time evolution
+    curr_time: List[float] = [0.0]
     for idx, t in enumerate(time):
         message_output(f"Time step {idx + 1}/{len(time)}\n", "output")
         optimized_circuit.compose(single_step_evolution_circuit_optimized, inplace=True)
@@ -373,11 +446,14 @@ def transpile_combine_strategy(single_step_evolution_circuit: QuantumCircuit,
                 1e-12
             )
         )
+        # Save the results at each timestep
+        curr_time.append(t)
+        result = TimeEvolutionResult(
+            optimized_circuit, observables_result[-1], observables_result, times=np.array(curr_time))
+        np.savez("results/time_evolution", times=result.times, observables=np.array(np.array(result.observables)[:, :, 0]))
     # Return the result
-    return TimeEvolutionResult(optimized_circuit,
-                                observables_result[-1],
-                                observables_result,
-                                times=np.array([0.0] + time))
+    return TimeEvolutionResult(
+        optimized_circuit, observables_result[-1], observables_result, times=np.array(curr_time))
 
 def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
                                initial_state: dict[
@@ -398,10 +474,15 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
         estimate_observables(estimator, evolved_state, observables, None, 1e-12)
     ]
     # 3. Time evolution
+    curr_time: List[float] = [0.0]
     for idx, t in enumerate(time):
         message_output(f"Time step {idx + 1}/{len(time)}\n", "output")
         # First, compose the unoptimized circuit
         evolved_state.compose(single_step_evolution_circuit, inplace=True)
+        # Save circuit (only for the first two steps because after that it gets too long)
+        if idx < 2 and evolved_state.num_qubits <= 8:
+            evolved_state.decompose(reps=2)\
+                .draw(output="mpl", filename=f"results/circuits/circuit_raw_t_{t:.4f}.png")
         # Then, transpile the combined circuit
         optimized_circuit: QuantumCircuit = \
             transpile(evolved_state, backend, optimization_level=optimization_level)
@@ -428,11 +509,14 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
         observables_result.append(
             estimate_observables(estimator, optimized_circuit, optimized_observables, None, 1e-12)
         )
+        # Save the results at each timestep
+        curr_time.append(t)
+        result = TimeEvolutionResult(
+            optimized_circuit, observables_result[-1], observables_result, times=np.array(curr_time))
+        np.savez("results/time_evolution", times=result.times, observables=np.array(np.array(result.observables)[:, :, 0]))
     # Return the result
-    return TimeEvolutionResult(evolved_state,
-                                observables_result[-1],
-                                observables_result,
-                                times=np.array([0.0] + time))
+    return TimeEvolutionResult(
+        optimized_circuit, observables_result[-1], observables_result, times=np.array(curr_time))
 
 def transpile_combine_transpile_strategy(
         single_step_evolution_circuit: QuantumCircuit,
@@ -469,6 +553,7 @@ def transpile_combine_transpile_strategy(
             1e-12
         )]
     # 6. Time evolution
+    curr_time: List[float] = [0.0]
     for idx, t in enumerate(time):
         message_output(f"Time step {idx + 1}/{len(time)}\n", "output")
         # 1. Compose the unoptimized circuit
@@ -491,8 +576,11 @@ def transpile_combine_transpile_strategy(
         observables_result.append(
             estimate_observables(estimator, optimized_circuit, optimized_observables, None, 1e-12)
         )
+        # Save the results at each timestep
+        curr_time.append(t)
+        result = TimeEvolutionResult(
+            optimized_circuit, observables_result[-1], observables_result, times=np.array(curr_time))
+        np.savez("results/time_evolution", times=result.times, observables=np.array(np.array(result.observables)[:, :, 0]))
     # Return the result
-    return TimeEvolutionResult(optimized_circuit,
-                                observables_result[-1],
-                                observables_result,
-                                times=np.array([0.0] + time))
+    return TimeEvolutionResult(
+        optimized_circuit, observables_result[-1], observables_result, times=np.array(curr_time))
