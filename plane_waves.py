@@ -1,10 +1,11 @@
 import os
 import sys
 import time
-from typing import List
+from typing import Dict, List
 
 import numpy as np
 from qiskit.providers.fake_provider import GenericBackendV2
+from qiskit.quantum_info import SparsePauliOp
 from qiskit_ibm_runtime import QiskitRuntimeService
 from qiskit_nature.second_q.operators import BosonicOp, FermionicOp, MixedOp
 
@@ -62,21 +63,23 @@ io.message_output("\n", "output")
 h_el, h_ph, h_int, h_qed = utils.get_h_qed_plane_waves(
     parsed_input_file["elec_energies"], modes_energies, lm_couplings)
 # 2. DEFINE THE OPERATORS to be measured
-observables: List[MixedOp] = []
+observables: dict[str, MixedOp] = {}
 if "energy" in parsed_input_file["observables"]:
-    observables.append(h_qed) # Total energy
-    observables.append(MixedOp({("F"): [(1.0, h_el)]})) # Electron energy
-    observables.append(MixedOp({("B"): [(1.0, h_ph)]})) # Photon energy
-    observables.append(h_int) # Interaction energy
+    observables["total_energy"] = h_qed
+    observables["electron_energy"] = MixedOp({("F"): [(1.0, h_el)]})
+    observables["photon_energy"] = MixedOp({("B"): [(1.0, h_ph)]})
+    observables["interaction_energy"] = h_int
 if "particle_number" in parsed_input_file["observables"]:
-    observables.append(MixedOp({("F"): [
-        # Electron number in excited state
-        (1., FermionicOp({"+_1 -_1": 1}, num_spin_orbitals=len(parsed_input_file["elec_energies"])))
-    ]}))
+    # Electron number in excited state
+    observables["electron_state_1_occupation"] = MixedOp(
+        {("F"): [(1.0, FermionicOp({"+_1 -_1": 1},
+                                   num_spin_orbitals=len(parsed_input_file["elec_energies"])))]}
+    )
     for i in range(number_of_modes):
         # Photon number in mode i
-        observables.append(
-            MixedOp({("B"): [(1.0, BosonicOp({f"+_{i} -_{i}": 1}, num_modes=number_of_modes))]}))
+        observables[f"photon_mode_{i}_occupation"] = MixedOp(
+            {("B"): [(1.0, BosonicOp({f"+_{i} -_{i}": 1}, num_modes=number_of_modes))]}
+        )
 if "ph_correlation" in parsed_input_file["observables"]:
     # Photon correlation between modes i and j
     # https://www.pnas.org/doi/full/10.1073/pnas.1615509114#sec-5, E field operator
@@ -89,14 +92,16 @@ if "ph_correlation" in parsed_input_file["observables"]:
             op4 = BosonicOp({f"-_{i} -_{j}": 1}, num_modes=number_of_modes)
             prefactor = 0.5 * np.sqrt(1 / (modes_energies[i] * modes_energies[j]))
             # Then, we put them all together
-            observables.append(MixedOp(
-                {("B"): [(prefactor, op1), (prefactor, op2), (prefactor, op3), (prefactor, op4)]}))
+            observables[f"photon_correlation_{i}_{j}"] = MixedOp(
+                {("B"): [(prefactor, op1), (prefactor, op2), (prefactor, op3), (prefactor, op4)]})
 # 3. DEFINE THE MAPPERS
 mixed_papper = \
     utils.get_mapper(number_of_modes, parsed_input_file["number_of_fock_states"])
 # 4. MAP THE HAMILTONIAN AND OBSERVABLES
 hqed_mapped = mixed_papper.map(h_qed)
-observables_mapped = [mixed_papper.map(op) for op in observables]
+observables_mapped: dict[str, SparsePauliOp] = {}
+for key, value in observables.items():
+    observables_mapped[key] = mixed_papper.map(value)
 # 5. DEFINE THE INITIAL STATE: The matter is in the excited state, the photons in the vacuum state
 init_state: dict[int, tuple[complex | np.complex128, complex | np.complex128]] = {}
 for n in range(number_of_modes):
@@ -106,7 +111,7 @@ init_state[number_of_modes] = (np.complex128(1), np.complex128(0))
 init_state[number_of_modes + 1] = (np.complex128(0), np.complex128(1))
 # 6. DEFINE THE HARDWARE
 if parsed_input_file["hardware"] == "generic_simulator":
-    backend = GenericBackendV2(num_qubits=hqed_mapped.num_qubits)
+    backend = AerSimulator.from_backend(GenericBackendV2(num_qubits=hqed_mapped.num_qubits))
     estimator = Estimator(options=dict(run_options={"shots": None}))
 else:
     try:

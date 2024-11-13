@@ -1,23 +1,26 @@
-from typing import List, Literal
+from typing import Any, List, Literal
 import numpy as np
 import numpy.typing as npt
-from qiskit import (QuantumCircuit, transpile)
+from qiskit import QuantumCircuit, transpile
+from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
+from qiskit.transpiler import StagedPassManager
 from qiskit.circuit.library import PauliEvolutionGate
 from qiskit.circuit.quantumregister import Qubit
-from qiskit.primitives import Estimator
+from qiskit.primitives import BaseEstimatorV2 as BaseEstimator, StatevectorEstimator
 from qiskit.providers import Backend
-from qiskit.quantum_info import SparsePauliOp, Statevector
+from qiskit.quantum_info import SparsePauliOp
 from qiskit.synthesis import LieTrotter, SuzukiTrotter
 
-from qiskit_algorithms import (TimeEvolutionProblem, TimeEvolutionResult,
-                               TrotterQRTE)
-from qiskit_algorithms.observables_evaluator import estimate_observables
+from qiskit_aer import AerSimulator
+
+from qiskit_algorithms import TimeEvolutionResult
 
 from qiskit_nature.second_q.mappers import (BosonicLogarithmicMapper,
                                             BravyiKitaevMapper, MixedMapper)
 from qiskit_nature.second_q.operators import BosonicOp, FermionicOp, MixedOp
 
 import io_tools as io
+from observables_utils import estimate_observables
 np.set_printoptions(precision=6, suppress=True)
 
 def get_h_qed_plane_waves(el_eigenvals: List[float],
@@ -154,40 +157,15 @@ def get_mapper(number_of_modes: int, number_of_fock_states: int) -> MixedMapper:
         hilbert_space_registers,
         hilbert_space_registers_types)
 
-def get_time_evolution_circuit(
-        h_mapped: SparsePauliOp,
-        initial_state: Statevector,
-        delta_t: float) -> QuantumCircuit:
-    """"This method generates the circuit corresponding to the time evolution of a single timestep
-    of the given Hamiltonian."""
-    # First, perform a single Trotter step
-    problem = TimeEvolutionProblem(h_mapped, initial_state=initial_state, time=delta_t)
-    trotter = TrotterQRTE(estimator=Estimator(), num_timesteps=1)
-    # Return the circuit corresponding to the evolved state
-    return trotter.evolve(problem).evolved_state
-
-def time_evolve(h_mapped: SparsePauliOp,
-                initial_state: Statevector,
-                aux_operators: List[SparsePauliOp],
-                final_time: float,
-                delta_t: float) -> TimeEvolutionResult:
-    """"
-    This method evolves the given initial state under the given Hamiltonian for the given time.
-    """
-    problem = TimeEvolutionProblem(
-        h_mapped, initial_state=initial_state, aux_operators=aux_operators, time=final_time)
-    trotter = TrotterQRTE(estimator=Estimator(), num_timesteps=int(final_time / delta_t))
-    return trotter.evolve(problem)
-
 def custom_time_evolve(h_mapped: SparsePauliOp,
-                       observables_mapped: List[SparsePauliOp],
+                       observables_mapped: dict[str, SparsePauliOp],
                        initial_state: dict[int,
                                            tuple[complex | np.complex128, complex | np.complex128]],
                        evolution_stategy: Literal["tc", "ct", "tct"],
                        evolution_synthesis: Literal["suzuki_trotter", "lie_trotter"],
                        optimization_level: int,
                        backend: Backend,
-                       estimator: Estimator,
+                       estimator: BaseEstimator,
                        final_time: float,
                        delta_t: float) -> TimeEvolutionResult:
     """"
@@ -291,8 +269,8 @@ def remove_idle_wires(qc: QuantumCircuit) -> QuantumCircuit:
             qc_out.qubits.remove(qubit)
     return qc_out
 
-def optimize_observables(observables: List[SparsePauliOp],
-                        circuit: QuantumCircuit) -> List[SparsePauliOp]:
+def optimize_observables(observables: dict[str, SparsePauliOp],
+                        circuit: QuantumCircuit) -> dict[str, SparsePauliOp]:
     """
     This method optimizes the observables to match the new qubit layout.
     Args:
@@ -301,10 +279,10 @@ def optimize_observables(observables: List[SparsePauliOp],
     Returns:
         A list containing the optimized observables.
     """
-    optimized_observables: List[SparsePauliOp] = []
+    optimized_observables: dict[str, SparsePauliOp] = {}
     final_index_layout: List[int] = circuit.layout.final_index_layout()
     # First loop over the observables that should be computed
-    for _, observable in enumerate(observables):
+    for key, observable in observables.items():
         optimized_observable: List[tuple[str, complex | np.complex128]] = []
         # Then loop over the terms of the observable. These are the Pauli strings (e.g. 'IIIZ')
         for op, coeff in observable.to_list():
@@ -313,11 +291,11 @@ def optimize_observables(observables: List[SparsePauliOp],
             for idx, i in enumerate(final_index_layout):
                 optimized_op[i] = op[len(final_index_layout) - 1 - idx]
             optimized_observable.append(("".join(optimized_op)[::-1], coeff))
-        optimized_observables.append(SparsePauliOp.from_list(optimized_observable))
+        optimized_observables[key] = SparsePauliOp.from_list(optimized_observable)
     return optimized_observables
 
-def remove_idle_qubit_from_obervables(observables: List[SparsePauliOp],
-                        circuit: QuantumCircuit) -> List[SparsePauliOp]:
+def remove_idle_qubit_from_obervables(observables: dict[str, SparsePauliOp],
+                        circuit: QuantumCircuit) -> dict[str, SparsePauliOp]:
     """
     This method optimizes the observables to match the new qubit layout.
     Args:
@@ -326,9 +304,9 @@ def remove_idle_qubit_from_obervables(observables: List[SparsePauliOp],
     Returns:
         A list containing the optimized observables.
     """
-    optimized_observables: List[SparsePauliOp] = []
+    optimized_observables: dict[str, SparsePauliOp] = {}
     # First loop over the observables that should be computed
-    for _, observable in enumerate(observables):
+    for key, observable in observables.items():
         optimized_observable: List[tuple[str, complex | np.complex128]] = []
         # Then loop over the terms of the observable. These are the Pauli strings (e.g. 'IIIZ')
         for op, coeff in observable.to_list():
@@ -342,7 +320,7 @@ def remove_idle_qubit_from_obervables(observables: List[SparsePauliOp],
                 qubit_idx: int = circuit.find_bit(qubit).index
                 optimized_op[idx] = op[len(op) - 1 - qubit_idx]
             optimized_observable.append(("".join(optimized_op)[::-1], coeff))
-        optimized_observables.append(SparsePauliOp.from_list(optimized_observable))
+        optimized_observables[key] = SparsePauliOp.from_list(optimized_observable)
     return optimized_observables
 
 def optimize_init_state(
@@ -383,10 +361,10 @@ def prepare_circuit(
 def transpile_combine_strategy(single_step_evolution_circuit: QuantumCircuit,
                                initial_state: dict[
                                    int, tuple[complex | np.complex128, complex | np.complex128]],
-                               observables: List[SparsePauliOp],
+                               observables: dict[str, SparsePauliOp],
                                time: List[float],
                                optimization_level: int,
-                               estimator: Estimator,
+                               estimator: BaseEstimator,
                                backend: Backend) -> QuantumCircuit:
     """"
     This method combines the single step evolution circuit and transpiles the combined circuit.
@@ -402,17 +380,11 @@ def transpile_combine_strategy(single_step_evolution_circuit: QuantumCircuit,
     # 3.1 Prepare the state in the circuit
     optimized_circuit: QuantumCircuit = prepare_circuit(optimized_circuit, optimized_init_state)
     # 4. Optimize the observables to match the new qubit layout
-    optimized_observables: List[SparsePauliOp] = \
+    optimized_observables: dict[str, tuple[float, dict[str, Any]]] = \
             optimize_observables(observables, single_step_evolution_circuit_optimized)
     # 5. Get the observables at time 0
-    observables_result = [
-        estimate_observables(
-            estimator,
-            optimized_circuit,
-            optimized_observables,
-            None,
-            1e-12
-        )]
+    observables_result: List[dict[str, tuple[float, dict[str, Any]]]] = [
+        estimate_observables(estimator, optimized_circuit, optimized_observables, 1e-12)]
     # 6. Time evolution
     curr_time: List[float] = [0.0]
     for idx, t in enumerate(time):
@@ -429,14 +401,7 @@ def transpile_combine_strategy(single_step_evolution_circuit: QuantumCircuit,
             optimized_circuit.draw(output="mpl", filename=f"results/circuits/circuit_t_{t:.4f}.png")
         # Compute observables
         observables_result.append(
-            estimate_observables(
-                estimator,
-                optimized_circuit,
-                optimized_observables,
-                None,
-                1e-12
-            )
-        )
+            estimate_observables(estimator, optimized_circuit, optimized_observables, 1e-12))
         # Save the results at each timestep
         curr_time.append(t)
         result = TimeEvolutionResult(
@@ -446,14 +411,14 @@ def transpile_combine_strategy(single_step_evolution_circuit: QuantumCircuit,
     return TimeEvolutionResult(
         optimized_circuit, observables_result[-1], observables_result, times=np.array(curr_time))
 
-def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
-                               initial_state: dict[
-                                   int, tuple[complex | np.complex128, complex | np.complex128]],
-                               observables: List[SparsePauliOp],
-                               time: List[float],
-                               optimization_level: int,
-                               estimator: Estimator,
-                               backend: Backend) -> QuantumCircuit:
+def combine_transpile_strategy(
+        single_step_evolution_circuit: QuantumCircuit,
+        initial_state: dict[int, tuple[complex | np.complex128, complex | np.complex128]],
+        observables: dict[str, SparsePauliOp],
+        time: List[float],
+        optimization_level: int,
+        estimator: BaseEstimator,
+        backend: Backend | AerSimulator) -> QuantumCircuit:
     """"
     This method transpiles the combined circuit.
     """
@@ -461,8 +426,8 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
     evolved_state = QuantumCircuit(single_step_evolution_circuit.qubits)
     evolved_state: QuantumCircuit = prepare_circuit(evolved_state, initial_state)
     # 2. Get the t = 0 observables
-    observables_result = [
-        estimate_observables(estimator, evolved_state, observables, None, 1e-12)
+    observables_result: List[dict[str, tuple[float, dict[str, Any]]]] = [
+        estimate_observables(StatevectorEstimator(), evolved_state, observables, 1e-12)
     ]
     # 3. Time evolution
     curr_time: List[float] = [0.0]
@@ -475,8 +440,9 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
             evolved_state.decompose(reps=2)\
                 .draw(output="mpl", filename=f"results/circuits/circuit_raw_t_{t:.4f}.png")
         # Then, transpile the combined circuit
-        optimized_circuit: QuantumCircuit = \
-            transpile(evolved_state, backend, optimization_level=optimization_level)
+        pass_manager: StagedPassManager = \
+            generate_preset_pass_manager(optimization_level=optimization_level, backend=backend)
+        optimized_circuit: QuantumCircuit = pass_manager.run(evolved_state)
 
         # Optimize the observables
         optimized_observables: List[SparsePauliOp] = \
@@ -498,13 +464,13 @@ def combine_transpile_strategy(single_step_evolution_circuit: QuantumCircuit,
 
         # Get the observables at time t
         observables_result.append(
-            estimate_observables(estimator, optimized_circuit, optimized_observables, None, 1e-12)
+            estimate_observables(estimator, optimized_circuit, optimized_observables, 1e-12)
         )
         # Save the results at each timestep
         curr_time.append(t)
         result = TimeEvolutionResult(
             optimized_circuit, observables_result[-1], observables_result, times=np.array(curr_time))
-        np.savez("results/time_evolution", times=result.times, observables=np.array(np.array(result.observables)[:, :, 0]))
+        np.savez("results/time_evolution", times=result.times, observables=np.array(result.observables))
     # Return the result
     return TimeEvolutionResult(
         optimized_circuit, observables_result[-1], observables_result, times=np.array(curr_time))
@@ -515,7 +481,7 @@ def transpile_combine_transpile_strategy(
         observables: List[SparsePauliOp],
         time: List[float],
         optimization_level: int,
-        estimator: Estimator,
+        estimator: BaseEstimator,
         backend: Backend) -> QuantumCircuit:
     """"
     This method combines the single step evolution circuit, transpiles the combined
@@ -536,13 +502,7 @@ def transpile_combine_transpile_strategy(
         optimize_observables(observables, single_step_evolution_circuit_optimized)
     # 5. Get the observables at time 0
     observables_result = [
-        estimate_observables(
-            estimator,
-            base_circuit,
-            t_0_optimized_observables,
-            None,
-            1e-12
-        )]
+        estimate_observables(estimator, base_circuit, t_0_optimized_observables, 1e-12)]
     # 6. Time evolution
     curr_time: List[float] = [0.0]
     for idx, t in enumerate(time):
@@ -565,7 +525,7 @@ def transpile_combine_transpile_strategy(
             optimize_observables(t_0_optimized_observables, optimized_circuit)
         # Get the observables at time t
         observables_result.append(
-            estimate_observables(estimator, optimized_circuit, optimized_observables, None, 1e-12)
+            estimate_observables(estimator, optimized_circuit, optimized_observables, 1e-12)
         )
         # Save the results at each timestep
         curr_time.append(t)
