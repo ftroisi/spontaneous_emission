@@ -50,6 +50,12 @@ def read_input_file(
                 for electron_eigenvalue in value.split(';'):
                     electron_eigenvalues.append(float(electron_eigenvalue.strip()))
                 values["elec_energies"] = electron_eigenvalues
+            elif key.strip() == "dipole_matrix_elements":
+                dipole_matrix_elements: List[float] = []
+                for dipole_matrix_element in value.split(';'):
+                    dipole_matrix_elements.append(float(dipole_matrix_element.strip()))
+                values["dipole_matrix_elements"] = dipole_matrix_elements
+            # Cavity parameters
             elif key.strip() == "modes_energies":
                 modes_energies: List[float] = []
                 for mode_energy in value.split(';'):
@@ -80,6 +86,8 @@ def read_input_file(
                 values["hardware"] = value.strip()
             elif key.strip() == "shots":
                 values["shots"] = int(value.strip())
+            elif key.strip() == "precision":
+                values["precision"] = int(value.strip())
             elif key.strip() == "time_evolution_strategy":
                 values["time_evolution_strategy"] = value.strip()
             elif key.strip() == "time_evolution_synthesis":

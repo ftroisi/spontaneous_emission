@@ -4,6 +4,7 @@ import time
 from typing import Dict, List
 
 import numpy as np
+from qiskit.primitives import BackendEstimatorV2 as BackendEstimator
 from qiskit.providers.fake_provider import GenericBackendV2
 from qiskit.quantum_info import SparsePauliOp
 from qiskit_ibm_runtime import QiskitRuntimeService
@@ -30,18 +31,17 @@ parsed_input_file = dict(io.read_input_file("input"))
 number_of_modes: int | None = parsed_input_file.get("number_of_modes", None)
 modes_energies: List[float] = parsed_input_file.get("modes_energies", [])
 cavity_length: float = parsed_input_file.get("cavity_length", 1.0)
+dipole_me: float = parsed_input_file.get("dipole_matrix_elements", [50.0])[0]
 
 # Define modes frequency and couplings
-# Equation 6 of: https://www.pnas.org/doi/full/10.1073/pnas.1615509114#sec-5
-# omega_a = pi * c * a /L
 if len(modes_energies) == 0 and number_of_modes is None:
     raise ValueError("If modes_energies is not provided, number_of_modes must be provided")
 if len(modes_energies) == 0:
+    # omega_a = (pi*c*a)/L, Eq. 6 of: https://www.pnas.org/doi/full/10.1073/pnas.1615509114#sec-5
     modes_energies = [np.pi * C * (alpha + 1) / cavity_length for alpha in range(number_of_modes)]
-# g_a = sqrt(omega_a / L) * sin(a * pi / 2)
-lm_couplings: List[np.float64] = \
-    [50*np.sqrt(omega / cavity_length) * np.sin((2*alpha + 1) * np.pi / 2) if alpha % 2 == 0 else 0
-        for alpha, omega in enumerate(modes_energies)]
+lm_couplings: List[np.float64] = [
+    dipole_me * np.sqrt(omega / cavity_length) * np.sin((2*alpha + 1) * np.pi / 2)
+    if alpha % 2 == 0 else 0 for alpha, omega in enumerate(modes_energies)]
 
 # Remove modes with zero coupling
 valid_modes = np.where(~np.isclose(np.array(lm_couplings), 0))[0]
@@ -63,7 +63,7 @@ io.message_output("\n", "output")
 h_el, h_ph, h_int, h_qed = utils.get_h_qed_plane_waves(
     parsed_input_file["elec_energies"], modes_energies, lm_couplings)
 # 2. DEFINE THE OPERATORS to be measured
-observables: dict[str, MixedOp] = {}
+observables: Dict[str, MixedOp] = {}
 if "energy" in parsed_input_file["observables"]:
     observables["total_energy"] = h_qed
     observables["electron_energy"] = MixedOp({("F"): [(1.0, h_el)]})
@@ -99,11 +99,11 @@ mixed_papper = \
     utils.get_mapper(number_of_modes, parsed_input_file["number_of_fock_states"])
 # 4. MAP THE HAMILTONIAN AND OBSERVABLES
 hqed_mapped = mixed_papper.map(h_qed)
-observables_mapped: dict[str, SparsePauliOp] = {}
+observables_mapped: Dict[str, SparsePauliOp] = {}
 for key, value in observables.items():
     observables_mapped[key] = mixed_papper.map(value)
 # 5. DEFINE THE INITIAL STATE: The matter is in the excited state, the photons in the vacuum state
-init_state: dict[int, tuple[complex | np.complex128, complex | np.complex128]] = {}
+init_state: Dict[int, tuple[complex | np.complex128, complex | np.complex128]] = {}
 for n in range(number_of_modes):
     init_state[n] = (np.complex128(1), np.complex128(0))
 # Add matter part
@@ -112,11 +112,12 @@ init_state[number_of_modes + 1] = (np.complex128(0), np.complex128(1))
 # 6. DEFINE THE HARDWARE
 if parsed_input_file["hardware"] == "generic_simulator":
     backend = AerSimulator.from_backend(GenericBackendV2(num_qubits=hqed_mapped.num_qubits))
-    estimator = Estimator(options=dict(run_options={"shots": None}))
+    estimator = Estimator(options={"default_precision": 0.0})
 else:
     try:
         hardware: str = parsed_input_file["hardware"].split("noisy_simulator_")[1] \
             if "noisy_simulator" in parsed_input_file["hardware"] else parsed_input_file["hardware"]
+        io.message_output(f"Retrieving backend info for {hardware}...\n", "output")
         # First, get the token
         token: str | None = None
         with open("ibm_token", "r", encoding="UTF-8") as f:
@@ -127,16 +128,23 @@ else:
         service.backends(simulator=False)
         # Finally, pick the selected the backend
         backend = service.backend(hardware)
-        estimator = Estimator(options={"shots": None})  # TODO: use BackendEstimator
+        estimator = BackendEstimator(
+            backend=backend,
+            options={"default_precision": parsed_input_file.get("precision", 0.01)}
+        )
         # Initialize the noise model from the selected hardware
-        if "noisy_simulator" in hardware:
+        if "noisy_simulator" in parsed_input_file["hardware"]:
             noise_model: NoiseModel = NoiseModel.from_backend(backend)
             backend: AerSimulator = AerSimulator.from_backend(backend)
-            estimator = Estimator(options={
-                "shots": parsed_input_file["shots"], "noise_model": noise_model})
+            estimator = Estimator(
+                options={
+                    "backend_options": {"noise_model": noise_model},
+                    "default_precision": parsed_input_file.get("precision", 0.01)
+                })
         io.message_output(f"Backend: {hardware}. Num qubits = {backend.num_qubits}\n", "output")
     except ValueError as e:
-        backend = GenericBackendV2(num_qubits=hqed_mapped.num_qubits)
+        backend = AerSimulator.from_backend(GenericBackendV2(num_qubits=hqed_mapped.num_qubits))
+        estimator = Estimator(options={"default_precision": 0.0})
         io.message_output(f"Error: {e}. Using generic BE instead\n", "output")
 # 7. Time evolve
 io.message_output(f"Starting time evolution with delta_t = {parsed_input_file["delta_t"]} and " +
