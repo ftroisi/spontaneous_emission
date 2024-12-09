@@ -44,7 +44,7 @@ def estimate_observables(
     if len(observables.values()) > 0:
         observables_list: ObservablesArray = _prepare_observables(observables)
         # Create the estimator pub
-        pub = EstimatorPub(quantum_state, observables_list, precision=threshold)
+        pub = EstimatorPub(quantum_state, observables_list)
         try:
             estimator_job: PrimitiveJob[PrimitiveResult[PubResult]] = estimator.run(pubs=[pub])
             data: DataBin = estimator_job.result()[0].data

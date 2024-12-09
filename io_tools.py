@@ -79,19 +79,24 @@ def read_input_file(
                 values["delta_t"] = float(value.strip())
             elif key.strip() == "final_time":
                 values["final_time"] = float(value.strip())
-            # Optimization
-            elif key.strip() == "optimization_level":
-                values["optimization_level"] = int(value.strip())
-            elif key.strip() == "hardware":
-                values["hardware"] = value.strip()
-            elif key.strip() == "shots":
-                values["shots"] = int(value.strip())
-            elif key.strip() == "precision":
-                values["precision"] = int(value.strip())
             elif key.strip() == "time_evolution_strategy":
                 values["time_evolution_strategy"] = value.strip()
             elif key.strip() == "time_evolution_synthesis":
                 values["time_evolution_synthesis"] = value.strip()
+            # Optimization
+            elif key.strip() == "optimization_level":
+                values["optimization_level"] = int(value.strip())
+            elif key.strip() == "shots":
+                values["shots"] = int(value.strip())
+            elif key.strip() == "precision":
+                values["precision"] = int(value.strip())
+            elif key.strip() == "error_mitigation":
+                values["error_mitigation"] = value.strip().lower() == "true"
+            # Hardware
+            elif key.strip() == "hardware_type":
+                values["hardware_type"] = value.strip()
+            elif key.strip() == "hardware_name":
+                values["hardware_name"] = value.strip()
             # Observables
             elif key.strip() == "observables":
                 observables_requested: List[float] = []

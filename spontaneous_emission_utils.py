@@ -12,6 +12,7 @@ from qiskit.quantum_info import SparsePauliOp
 from qiskit.synthesis import LieTrotter, SuzukiTrotter
 
 from qiskit_aer import AerSimulator
+from qiskit_ibm_runtime.fake_provider.fake_backend import FakeBackendV2 as FakeBackend
 
 from qiskit_algorithms import TimeEvolutionResult
 
@@ -164,7 +165,7 @@ def custom_time_evolve(h_mapped: SparsePauliOp,
                        evolution_stategy: Literal["tc", "ct", "tct"],
                        evolution_synthesis: Literal["suzuki_trotter", "lie_trotter"],
                        optimization_level: int,
-                       backend: Backend,
+                       backend: FakeBackend | AerSimulator,
                        estimator: BaseEstimator,
                        final_time: float,
                        delta_t: float) -> TimeEvolutionResult:
@@ -280,18 +281,9 @@ def optimize_observables(observables: Dict[str, SparsePauliOp],
         A list containing the optimized observables.
     """
     optimized_observables: Dict[str, SparsePauliOp] = {}
-    final_index_layout: List[int] = circuit.layout.final_index_layout()
     # First loop over the observables that should be computed
     for key, observable in observables.items():
-        optimized_observable: List[tuple[str, complex | np.complex128]] = []
-        # Then loop over the terms of the observable. These are the Pauli strings (e.g. 'IIIZ')
-        for op, coeff in observable.to_list():
-            optimized_op: List[str] = ["I"] * circuit.num_qubits
-            # For each term, we need to map the qubit indices to the new layout
-            for idx, i in enumerate(final_index_layout):
-                optimized_op[i] = op[len(final_index_layout) - 1 - idx]
-            optimized_observable.append(("".join(optimized_op)[::-1], coeff))
-        optimized_observables[key] = SparsePauliOp.from_list(optimized_observable)
+        optimized_observables[key] = observable.apply_layout(circuit.layout)
     return optimized_observables
 
 def remove_idle_qubit_from_obervables(
@@ -420,7 +412,7 @@ def combine_transpile_strategy(
         time: List[float],
         optimization_level: int,
         estimator: BaseEstimator,
-        backend: Backend | AerSimulator) -> QuantumCircuit:
+        backend: FakeBackend) -> QuantumCircuit:
     """"
     This method transpiles the combined circuit.
     """
@@ -442,8 +434,8 @@ def combine_transpile_strategy(
             evolved_state.decompose(reps=2)\
                 .draw(output="mpl", filename=f"results/circuits/circuit_raw_t_{t:.4f}.png")
         # Then, transpile the combined circuit
-        pass_manager: StagedPassManager = \
-            generate_preset_pass_manager(optimization_level=optimization_level, backend=backend)
+        pass_manager: StagedPassManager = generate_preset_pass_manager(
+            optimization_level=optimization_level, coupling_map=backend.coupling_map, basis_gates=list(backend.target.operation_names))
         optimized_circuit: QuantumCircuit = pass_manager.run(evolved_state)
         io.message_output(
             f"Circuit optimized with level: {optimization_level}. Used qubits: ", "output")
@@ -455,14 +447,14 @@ def combine_transpile_strategy(
         optimized_observables: Dict[str, SparsePauliOp] = \
             optimize_observables(observables, optimized_circuit)
 
-        if isinstance(backend, AerSimulator):
-            # Remove unused qubits from circuit description
-            optimized_circuit = remove_idle_wires(optimized_circuit)
-            optimized_observables = \
-                remove_idle_qubit_from_obervables(optimized_observables, optimized_circuit)
-            # Generate the new circuit with the correct number of qubits
-            optimized_circuit = QuantumCircuit.from_instructions(
-                optimized_circuit.data, qubits=optimized_circuit.qubits)
+        # if isinstance(backend, (AerSimulator, FakeBackend)):
+        #     # Remove unused qubits from circuit description
+        #     optimized_circuit = remove_idle_wires(optimized_circuit)
+        #     optimized_observables = \
+        #         remove_idle_qubit_from_obervables(optimized_observables, optimized_circuit)
+        #     # Generate the new circuit with the correct number of qubits
+        #     optimized_circuit = QuantumCircuit.from_instructions(
+        #         optimized_circuit.data, qubits=optimized_circuit.qubits)
 
         # Save circuit (only for the first two steps because after that it gets too long)
         if idx < 2 and optimized_circuit.num_qubits <= 10:
@@ -473,7 +465,7 @@ def combine_transpile_strategy(
 
         # Get the observables at time t
         observables_result.append(
-            estimate_observables(estimator, optimized_circuit, optimized_observables, 1e-12)
+            estimate_observables(estimator, optimized_circuit, optimized_observables, 1e-4)
         )
         # Save the results at each timestep
         curr_time.append(t)

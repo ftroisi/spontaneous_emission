@@ -5,14 +5,15 @@ from typing import Dict, List
 import numpy as np
 import matplotlib.pyplot as plt
 
-from qiskit.primitives import BackendEstimatorV2 as BackendEstimator
 from qiskit.providers.fake_provider import GenericBackendV2
 from qiskit.quantum_info import SparsePauliOp
-from qiskit_ibm_runtime import QiskitRuntimeService
+
+from qiskit_ibm_runtime import QiskitRuntimeService, EstimatorV2 as BackendEstimator
+from qiskit_ibm_runtime.fake_provider.fake_backend import FakeBackendV2 as FakeBackend
+
 from qiskit_nature.second_q.operators import BosonicOp, FermionicOp, MixedOp
 
 from qiskit_aer import AerSimulator
-from qiskit_aer.noise import NoiseModel
 from qiskit_aer.primitives import EstimatorV2 as Estimator
 
 sys.path.append('./')
@@ -202,42 +203,38 @@ for n in range(number_of_basis_functions):
 init_state[number_of_basis_functions] = (np.complex128(1), np.complex128(0))
 init_state[number_of_basis_functions + 1] = (np.complex128(0), np.complex128(1))
 # 6. DEFINE THE HARDWARE
-if parsed_input_file["hardware"] == "generic_simulator":
+# Perform a simulation with an ideal simulator (no noise, ideal connectivity)
+if parsed_input_file["hardware_type"] == "ideal_simulator":
     backend = AerSimulator.from_backend(GenericBackendV2(num_qubits=hqed_mapped.num_qubits))
     estimator = Estimator(options={"default_precision": 0.0})
+# Perform a simulation with a noisy simulator.
+# The noise model is extracted from the hardware, as well as the connectivity scheme
+elif parsed_input_file["hardware_type"] == "noisy_simulator":
+    hardware: str = parsed_input_file["hardware_name"]
+    io.message_output(f"Retrieving backend info for {hardware}...\n", "output")
+    # Instantiate the Qiskit Runtime service and get the backend
+    service = QiskitRuntimeService(channel="local")
+    backend: FakeBackend = service.backend("fake_" + hardware)
+    # Now define the estimator
+    options: dict = {
+        "default_precision": parsed_input_file.get("precision", 0.01),
+        "resilience_level": 0
+    }
+    if parsed_input_file.get("error_mitigation", False):
+        options["resilience_level"] = 2
+        options["resilience"] = {
+            "zne_mitigation": True, 
+            "zne": { 
+                "amplifier": "pea" 
+            }}
+        options["dynamical_decoupling"] = {
+            "enable": True,
+            "sequence_type": "XpXm"
+        }
+    estimator = BackendEstimator(mode=backend, options=options)
 else:
-    try:
-        hardware: str = parsed_input_file["hardware"].split("noisy_simulator_")[1] \
-            if "noisy_simulator" in parsed_input_file["hardware"] else parsed_input_file["hardware"]
-        io.message_output(f"Retrieving backend info for {hardware}...\n", "output")
-        # First, get the token
-        token: str | None = None
-        with open("ibm_token", "r", encoding="UTF-8") as f:
-            token = f.readline().split("\n")[0]
-            f.close()
-        # Then, get the available backends
-        service = QiskitRuntimeService(channel="ibm_quantum", token=token)
-        service.backends(simulator=False)
-        # Finally, pick the selected the backend
-        backend = service.backend(hardware)
-        estimator = BackendEstimator(
-            backend=backend,
-            options={"default_precision": parsed_input_file.get("precision", 0.01)}
-        )
-        # Initialize the noise model from the selected hardware
-        if "noisy_simulator" in parsed_input_file["hardware"]:
-            noise_model: NoiseModel = NoiseModel.from_backend(backend)
-            backend: AerSimulator = AerSimulator.from_backend(backend)
-            estimator = Estimator(
-                options={
-                    "backend_options": {"noise_model": noise_model},
-                    "default_precision": parsed_input_file.get("precision", 0.01)
-                })
-        io.message_output(f"Backend: {hardware}. Num qubits = {backend.num_qubits}\n", "output")
-    except ValueError as e:
-        backend = AerSimulator.from_backend(GenericBackendV2(num_qubits=hqed_mapped.num_qubits))
-        estimator = Estimator(options={"default_precision": 0.0})
-        io.message_output(f"Error: {e}. Using generic BE instead\n", "output")
+    raise ValueError(f"Hardware type not recognized: {parsed_input_file['hardware_type']}")
+
 # 7. Time evolve
 io.message_output(f"Starting time evolution with delta_t = {parsed_input_file["delta_t"]} and " +
     f"final_time = {parsed_input_file["final_time"]}\n", "output")
