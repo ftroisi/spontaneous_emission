@@ -435,17 +435,32 @@ def combine_transpile_strategy(
                 .draw(output="mpl", filename=f"results/circuits/circuit_raw_t_{t:.4f}.png")
         # Then, transpile the combined circuit
         pass_manager: StagedPassManager = generate_preset_pass_manager(
-            optimization_level=optimization_level, coupling_map=backend.coupling_map, basis_gates=list(backend.target.operation_names))
-        optimized_circuit: QuantumCircuit = pass_manager.run(evolved_state)
+            optimization_level=optimization_level,
+            backend=backend,
+            basis_gates=list(backend.target.operation_names))
+        # Since the transpilation is stochastic, we run it multiple times to get the best result
+        best_optimized_circuit: QuantumCircuit = pass_manager.run(evolved_state)
+        best_depth: int = best_optimized_circuit.depth()
+        best_cnot: int = best_optimized_circuit.count_ops().get("ecr", 1e9)
+        for _ in range(50):
+            new_optimized_circuit: QuantumCircuit = pass_manager.run(evolved_state)
+            new_depth: int = new_optimized_circuit.depth()
+            new_cnot: int = new_optimized_circuit.count_ops().get("ecr", 1e9)
+            # If the new circuit is better (less CNOTs or equal CNOTs with less depth),
+            # update the best circuit
+            if new_cnot < best_cnot or (new_cnot == best_cnot and new_depth < best_depth):
+                best_optimized_circuit = new_optimized_circuit.copy()
+                best_depth = new_depth
+                best_cnot = new_cnot
         io.message_output(
             f"Circuit optimized with level: {optimization_level}. Used qubits: ", "output")
         used_qubits: List[Qubit] = \
-            [qubit for qubit, count in count_gates(optimized_circuit).items() if count > 0]
+            [qubit for qubit, count in count_gates(best_optimized_circuit).items() if count > 0]
         io.message_output(f"{used_qubits}\n", "output")
 
         # Optimize the observables
         optimized_observables: Dict[str, SparsePauliOp] = \
-            optimize_observables(observables, optimized_circuit)
+            optimize_observables(observables, best_optimized_circuit)
 
         # if isinstance(backend, (AerSimulator, FakeBackend)):
         #     # Remove unused qubits from circuit description
@@ -457,24 +472,33 @@ def combine_transpile_strategy(
         #         optimized_circuit.data, qubits=optimized_circuit.qubits)
 
         # Save circuit (only for the first two steps because after that it gets too long)
-        if idx < 2 and optimized_circuit.num_qubits <= 10:
-            optimized_circuit.draw(output="mpl", filename=f"results/circuits/circuit_t_{t:.4f}.png")
-        operations = optimized_circuit.count_ops()
+        if idx < 2 and len(used_qubits) <= 10:
+            best_optimized_circuit.draw(
+                output="mpl", idle_wires=False, filename=f"results/circuits/circuit_t_{t:.4f}.png")
+        io.message_output(f"Circuit Depth: {best_depth}\n", "output")
+        operations = best_optimized_circuit.count_ops()
         for op in operations:
             io.message_output(f"{op}: {operations[op]}\n", "output")
 
         # Get the observables at time t
         observables_result.append(
-            estimate_observables(estimator, optimized_circuit, optimized_observables, 1e-4)
+            estimate_observables(estimator, best_optimized_circuit, optimized_observables, 1e-4)
         )
         # Save the results at each timestep
         curr_time.append(t)
         result = TimeEvolutionResult(
-            optimized_circuit, observables_result[-1], observables_result, times=np.array(curr_time))
-        np.savez("results/time_evolution", times=result.times, observables=np.array(result.observables))
+            best_optimized_circuit,
+            observables_result[-1],
+            observables_result,
+            times=np.array(curr_time))
+        np.savez("results/time_evolution",
+                 times=result.times, observables=np.array(result.observables))
     # Return the result
     return TimeEvolutionResult(
-        optimized_circuit, observables_result[-1], observables_result, times=np.array(curr_time))
+        best_optimized_circuit,
+        observables_result[-1],
+        observables_result,
+        times=np.array(curr_time))
 
 def transpile_combine_transpile_strategy(
         single_step_evolution_circuit: QuantumCircuit,
