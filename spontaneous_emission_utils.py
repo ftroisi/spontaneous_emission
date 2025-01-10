@@ -462,15 +462,6 @@ def combine_transpile_strategy(
         optimized_observables: Dict[str, SparsePauliOp] = \
             optimize_observables(observables, best_optimized_circuit)
 
-        # if isinstance(backend, (AerSimulator, FakeBackend)):
-        #     # Remove unused qubits from circuit description
-        #     optimized_circuit = remove_idle_wires(optimized_circuit)
-        #     optimized_observables = \
-        #         remove_idle_qubit_from_obervables(optimized_observables, optimized_circuit)
-        #     # Generate the new circuit with the correct number of qubits
-        #     optimized_circuit = QuantumCircuit.from_instructions(
-        #         optimized_circuit.data, qubits=optimized_circuit.qubits)
-
         # Save circuit (only for the first two steps because after that it gets too long)
         if idx < 2 and len(used_qubits) <= 10:
             best_optimized_circuit.draw(
