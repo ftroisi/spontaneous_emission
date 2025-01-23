@@ -1,9 +1,24 @@
+# Copyright 2025 Francesco Troisi
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import os
 import sys
 import time
 from typing import Dict, List
 
 import numpy as np
+from qiskit.providers.backend import BackendV2
 from qiskit.providers.fake_provider import GenericBackendV2
 from qiskit.quantum_info import SparsePauliOp
 
@@ -114,7 +129,7 @@ init_state[number_of_modes + 1] = (np.complex128(0), np.complex128(1))
 # 6. DEFINE THE HARDWARE
 # Perform a simulation with an ideal simulator (no noise, ideal connectivity)
 if parsed_input_file["hardware_type"] == "ideal_simulator":
-    backend: AerSimulator = AerSimulator.from_backend(
+    real_backend: AerSimulator = AerSimulator.from_backend(
         GenericBackendV2(num_qubits=hqed_mapped.num_qubits))
     estimator = AerEstimator(options={"default_precision": 0.0})
 # Perform a simulation with a noisy simulator.
@@ -129,17 +144,15 @@ elif parsed_input_file["hardware_type"] == "noisy_simulator":
         f.close()
     # Instantiate the Qiskit Runtime service and get the backend
     service = QiskitRuntimeService(channel="ibm_quantum", token=token)
-    real_backend = service.backend(f"ibm_{hardware}")
+    real_backend: BackendV2 = service.backend(f"ibm_{hardware}")
     # Define the noise model
     noise_model: NoiseModel = NoiseModel.from_backend(real_backend)
-    backend: AerSimulator = AerSimulator.from_backend(real_backend)
-    # Finally, define the estimator
-    estimator = AerEstimator.from_backend(
-        backend,
-        options={
-            "backend_options": {"noise_model": noise_model},
-            "default_precision": parsed_input_file.get("precision", 0.01)
-        })
+    backend: AerSimulator = AerSimulator.from_backend(real_backend, noise_model=noise_model)
+    options_aer = {
+        "default_precision": parsed_input_file.get("precision", 1e-9),
+        "backend_options": {"enable_truncation": True}
+    }
+    estimator = AerEstimator.from_backend(backend, options=options_aer)
 # Run on real hardware
 elif parsed_input_file["hardware_type"] == "real_hardware":
     hardware: str = parsed_input_file["hardware_name"]
@@ -177,7 +190,7 @@ result: utils.TimeEvolutionResult = utils.custom_time_evolve(
     parsed_input_file["time_evolution_strategy"],
     parsed_input_file["time_evolution_synthesis"],
     parsed_input_file["optimization_level"],
-    backend,
+    real_backend,
     estimator,
     parsed_input_file["final_time"],
     parsed_input_file["delta_t"]

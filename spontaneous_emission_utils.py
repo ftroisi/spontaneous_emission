@@ -1,3 +1,17 @@
+# Copyright 2025 Francesco Troisi
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from typing import Any, List, Dict, Literal
 import numpy as np
 import numpy.typing as npt
@@ -8,6 +22,7 @@ from qiskit.circuit.library import PauliEvolutionGate
 from qiskit.circuit.quantumregister import Qubit
 from qiskit.primitives import BaseEstimatorV2 as BaseEstimator, StatevectorEstimator
 from qiskit.providers import Backend
+from qiskit.providers.backend import BackendV2
 from qiskit.quantum_info import SparsePauliOp
 from qiskit.synthesis import LieTrotter, SuzukiTrotter
 
@@ -165,7 +180,7 @@ def custom_time_evolve(h_mapped: SparsePauliOp,
                        evolution_stategy: Literal["tc", "ct", "tct"],
                        evolution_synthesis: Literal["suzuki_trotter", "lie_trotter"],
                        optimization_level: int,
-                       backend: FakeBackend | AerSimulator,
+                       backend: FakeBackend | AerSimulator | BackendV2,
                        estimator: BaseEstimator,
                        final_time: float,
                        delta_t: float) -> TimeEvolutionResult:
@@ -412,7 +427,8 @@ def combine_transpile_strategy(
         time: List[float],
         optimization_level: int,
         estimator: BaseEstimator,
-        backend: FakeBackend) -> QuantumCircuit:
+        backend: FakeBackend | AerSimulator | BackendV2
+    ) -> QuantumCircuit:
     """"
     This method transpiles the combined circuit.
     """
@@ -437,7 +453,8 @@ def combine_transpile_strategy(
         pass_manager: StagedPassManager = generate_preset_pass_manager(
             optimization_level=optimization_level,
             backend=backend,
-            basis_gates=list(backend.target.operation_names))
+            basis_gates=list(backend.target.operation_names),
+            target=backend.target)
         # Since the transpilation is stochastic, we run it multiple times to get the best result
         best_optimized_circuit: QuantumCircuit = pass_manager.run(evolved_state)
         best_depth: int = best_optimized_circuit.depth()
